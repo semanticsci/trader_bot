@@ -30,14 +30,25 @@ from trader.domain.models import to_json
 
 log = logging.getLogger("trader")
 
+# Libraries that log request URLs. The Telegram Bot API puts the bot token IN the URL,
+# so these must never log at INFO — not to the terminal, not to the launchd log, not with -v.
+_SECRET_LEAKING_LOGGERS = ("httpx", "httpcore")
+
+
+def configure_logging(*, verbose: bool = False) -> None:
+    """Set up logging so that our own messages are visible and third-party URL logs are not."""
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    for name in _SECRET_LEAKING_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(verbose=args.verbose)
     try:
         return int(args.func(args) or 0)
     except ConfigError as exc:

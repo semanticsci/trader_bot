@@ -145,3 +145,17 @@ def test_paper_is_default(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("ALPACA_PAPER", raising=False)
     s = load_settings(tmp_path)
     assert s.mode == "paper" and s.risk.max_order_notional == Decimal("250")
+
+
+# ---------------------------------------------------------------- secrets never reach logs
+
+
+def test_httpx_url_logging_is_silenced_even_when_verbose():
+    """The Telegram Bot API puts the token in the URL; httpx logs URLs at INFO. We must silence it."""
+    import logging
+
+    from trader.cli import configure_logging
+
+    configure_logging(verbose=True)
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+    assert not logging.getLogger("httpcore").isEnabledFor(logging.INFO)
