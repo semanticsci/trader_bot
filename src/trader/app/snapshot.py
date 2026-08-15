@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 
 from trader.domain.indicators import compute_indicators
 from trader.domain.models import MarketSnapshot, utcnow
@@ -16,6 +17,7 @@ def take_snapshot(
     data: MarketDataPort,
     universe: tuple[str, ...],
     history_days: int,
+    capital_cap: Decimal | None = None,
 ) -> MarketSnapshot:
     """Collect account + quotes + indicators for the universe and any held symbols."""
     account = broker.get_account()
@@ -37,6 +39,7 @@ def take_snapshot(
         quotes=quotes,
         indicators=indicators,
         universe=universe,
+        capital_cap=capital_cap,
     )
     log.info(
         "snapshot: equity=%s cash=%s positions=%d quotes=%d market_open=%s",

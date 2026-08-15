@@ -45,7 +45,7 @@ class Settings:
     history_days: int
     risk: RiskConfig
     timezone: str
-    propose_local_time: str
+    propose_local_times: tuple[str, ...]
     weekly_target_pct: Decimal
     extra: dict[str, object] = field(default_factory=dict)
 
@@ -81,7 +81,10 @@ def load_settings(root: Path | None = None, *, require_broker: bool = True) -> S
         cfg = tomllib.load(f)
 
     risk_cfg = cfg.get("risk", {})
+    cap_raw = risk_cfg.get("capital_cap")
+    capital_cap = Decimal(str(cap_raw)) if cap_raw not in (None, 0, "0", "") else None
     risk = RiskConfig(
+        capital_cap=capital_cap,
         max_position_pct=Decimal(str(risk_cfg.get("max_position_pct", "0.25"))),
         max_order_notional=Decimal(str(risk_cfg.get("max_order_notional", "400"))),
         max_orders_per_proposal=int(risk_cfg.get("max_orders_per_proposal", 3)),
@@ -134,7 +137,7 @@ def load_settings(root: Path | None = None, *, require_broker: bool = True) -> S
         history_days=int(universe_cfg.get("history_days", 60)),
         risk=risk,
         timezone=str(schedule_cfg.get("timezone", "America/New_York")),
-        propose_local_time=str(schedule_cfg.get("propose_local_time", "08:30")),
+        propose_local_times=tuple(str(x) for x in schedule_cfg.get("propose_local_times", ["09:45"])),
         weekly_target_pct=Decimal(str(goal_cfg.get("weekly_return_target_pct", "0"))),
     )
 

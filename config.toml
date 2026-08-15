@@ -12,6 +12,11 @@ history_days = 60
 [risk]
 # --- Everything in this section is enforced IN CODE. The LLM cannot override it. ---
 
+# The most capital the strategy may ever have deployed, in dollars. Position % and cash-buffer rules
+# are measured against min(equity, capital_cap). Lets a $100k paper account behave like a $1,000 one.
+# Remove the line (or set 0) to manage the whole account.
+capital_cap = 1000
+
 # Largest a single position may be, as a fraction of total equity, AFTER the order fills.
 max_position_pct = 0.25
 # Largest single order, in dollars.
@@ -29,14 +34,15 @@ allow_fractional = true
 # Selling more than you own would open a short. Keep false while learning.
 allow_shorting = false
 # A proposal is only valid this long after creation (stale limit prices are dangerous).
-proposal_ttl_hours = 7
+proposal_ttl_hours = 3
 # Symbols the gate will always reject (leveraged ETFs, penny stocks, whatever you decide).
 blocked_symbols = ["TQQQ", "SQQQ", "UVXY", "SPXU"]
 
 [schedule]
 # Informational — the actual schedule lives in your Cowork tasks / launchd. Kept here so the
 # report can say "the plan was 08:30 ET" and the code can compute proposal expiry sensibly.
-propose_local_time = "08:30"
+# Three proposal windows on trading days: after the open settles, midday, and before the close.
+propose_local_times = ["09:45", "12:30", "15:00"]
 timezone = "America/New_York"
 
 [goal]

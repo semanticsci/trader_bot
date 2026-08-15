@@ -48,6 +48,11 @@ def evaluate(
     results: list[GateResult] = []
     accepted_count = 0
     cash_committed = Decimal("0")  # buys already accepted in this proposal
+    # Percentage rules are measured against the capital *budget*, not necessarily the whole account
+    # (a $100k paper account simulating $1,000 — see RiskConfig.capital_cap).
+    capital_cap = config.capital_cap if config.capital_cap is not None else snapshot.capital_cap
+    base = min(account.equity, capital_cap) if capital_cap is not None else account.equity
+    invested = snapshot.invested  # market value already deployed, before this proposal
     # Position values after the buys/sells accepted so far (symbol -> market value)
     projected_value: dict[str, Decimal] = {p.symbol: p.market_value for p in account.positions}
     projected_qty: dict[str, Decimal] = {p.symbol: p.qty for p in account.positions}
@@ -74,8 +79,9 @@ def evaluate(
                     f"yesterday, limit is -{config.max_daily_loss_pct:.0%} — no new buys today"
                 )
             reasons += _check_buy_size(
-                order, account, config, cash_committed, projected_value.get(order.symbol, Decimal("0"))
+                order, account, base, config, cash_committed, projected_value.get(order.symbol, Decimal("0"))
             )
+            reasons += _check_capital_cap(order, invested, cash_committed, capital_cap)
         else:
             reasons += _check_sell(order, projected_qty.get(order.symbol, Decimal("0")), config)
 
@@ -147,25 +153,27 @@ def _check_limit_distance(
 def _check_buy_size(
     order: ProposedOrder,
     account: Account,
+    base: Decimal,
     config: RiskConfig,
     cash_already_committed: Decimal,
     current_symbol_value: Decimal,
 ) -> list[str]:
+    """Size rules. ``base`` is min(equity, capital_cap) — the capital we're actually managing."""
     reasons = []
     notional = order.notional
 
     if notional > config.max_order_notional:
         reasons.append(f"order is ${notional}, max single order is ${config.max_order_notional}")
 
-    if account.equity > 0:
+    if base > 0:
         after = current_symbol_value + notional
-        pct = after / account.equity
+        pct = after / base
         if pct > config.max_position_pct:
             reasons.append(
-                f"would make {order.symbol} {pct:.0%} of equity, cap is {config.max_position_pct:.0%}"
+                f"would make {order.symbol} {pct:.0%} of capital, cap is {config.max_position_pct:.0%}"
             )
 
-    buffer = account.equity * config.min_cash_buffer_pct
+    buffer = base * config.min_cash_buffer_pct
     cash_after = account.cash - cash_already_committed - notional
     if cash_after < buffer:
         reasons.append(
@@ -173,6 +181,18 @@ def _check_buy_size(
             f"buffer (${buffer:.2f})"
         )
     return reasons
+
+
+def _check_capital_cap(
+    order: ProposedOrder, invested_now: Decimal, buys_committed: Decimal, cap: Decimal | None
+) -> list[str]:
+    """Total deployed capital (held + buys in this proposal) may not exceed the cap."""
+    if cap is None:
+        return []
+    after = invested_now + buys_committed + order.notional
+    if after > cap:
+        return [f"would put ${after:.2f} to work, capital cap is ${cap:.2f}"]
+    return []
 
 
 def _check_sell(order: ProposedOrder, held_qty: Decimal, config: RiskConfig) -> list[str]:

@@ -38,7 +38,7 @@ class ProposeDeps:
 
 def run_propose(deps: ProposeDeps) -> Proposal:
     """Run one full proposal cycle and return the resulting Proposal."""
-    snapshot = take_snapshot(deps.broker, deps.data, deps.universe, deps.history_days)
+    snapshot = take_snapshot(deps.broker, deps.data, deps.universe, deps.history_days, deps.risk_config.capital_cap)
 
     decision = deps.decider.decide(snapshot, deps.strategy_prompt)
     log.info("brain proposed %d order(s)", len(decision.orders))

@@ -7,7 +7,9 @@ in and `trader propose --dry-run` works.
 
 | Task | Cron (local) | Prompt file | What it does |
 |---|---|---|---|
-| `trading-morning-proposal` | `30 8 * * 1-5` | `morning-proposal.md` | runs `trader propose`, which sends you the Telegram proposal |
+| `trading-proposal-open` | `45 9 * * 1-5` | `proposal.md` | runs `trader propose` after the open settles → Telegram proposal |
+| `trading-proposal-midday` | `30 12 * * 1-5` | `proposal.md` | same, midday check-in |
+| `trading-proposal-close` | `0 15 * * 1-5` | `proposal.md` | same, before the close (proposal TTL is 3 h, so it dies at 18:00) |
 | `trading-eod-summary` | `15 16 * * 1-5` | `eod-summary.md` | runs `trader report daily --send` |
 | `trading-weekly-report` | `0 18 * * 0` | `weekly-report.md` | runs `trader report weekly --send` and critiques STRATEGY.md |
 
@@ -20,6 +22,8 @@ Facts about Cowork scheduled tasks worth knowing:
 * Each run starts fresh with no memory of past chats — that's why the prompts are
   self-contained and everything they need lives in this repo.
 * Where the tasks live on disk: `~/.claude/scheduled-tasks/<task-id>/SKILL.md`.
+* Times are America/New_York (the Mac's timezone). US market hours are 09:30–16:00 ET.
+  The three windows deliberately skip the first 15 minutes (noisy) and stop an hour before close.
 
 ## The one thing these tasks never do
 
@@ -33,5 +37,5 @@ the proposal is on your phone.
    Simple, and it works without Cowork — this is what your sons would run from cron.
 2. **Agent-as-brain** — the scheduled task itself reads `trader snapshot` + `STRATEGY.md`,
    writes `data/decision.json`, then runs `trader propose --decision data/decision.json`.
-   No API key needed; the reasoning happens in the Cowork agent. `morning-proposal.md`
-   describes both; pick one and delete the other paragraph.
+   No API key needed; the reasoning happens in the Cowork agent. `proposal.md` describes both
+   and picks automatically based on whether `ANTHROPIC_API_KEY` is set.

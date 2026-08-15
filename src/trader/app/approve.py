@@ -145,7 +145,7 @@ def submit_proposal(proposal: Proposal, deps: ApproveDeps) -> TapOutcome:
         deps.notifier.update_proposal_message(proposal, "🛑 HALT file present — nothing was submitted.")
         return TapOutcome(proposal.id, "skipped", message="halted")
 
-    fresh = take_snapshot(deps.broker, deps.data, deps.universe, deps.history_days)
+    fresh = take_snapshot(deps.broker, deps.data, deps.universe, deps.history_days, deps.risk_config.capital_cap)
     results = risk.evaluate(proposal.accepted, fresh, deps.risk_config, halted=False)
 
     submitted: list[str] = []

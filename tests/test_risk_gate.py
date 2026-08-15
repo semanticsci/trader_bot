@@ -62,7 +62,7 @@ def test_order_notional_cap(snapshot, risk_config):
 def test_position_concentration_cap(snapshot, risk_config):
     # Already hold $400 of AAPL (40% — over cap already); buying more must be rejected.
     res = risk.evaluate([order("AAPL", Side.BUY, "1", "200")], snapshot, risk_config)
-    assert "of equity, cap is" in _reasons(res)
+    assert "of capital, cap is" in _reasons(res)
 
 
 def test_cash_buffer(risk_config):
@@ -141,3 +141,52 @@ def test_every_rejection_has_a_reason(snapshot, risk_config):
 def test_summarize(snapshot, risk_config):
     res = risk.evaluate([order("NVDA", Side.BUY, "1", "180"), order("TQQQ", Side.BUY, "1", "50")], snapshot, risk_config)
     assert risk.summarize(res) == "1 of 2 passed the risk gate"
+
+
+# ---------------------------------------------------------------- capital cap (paper $100k acting like $1,000)
+
+
+def _big_paper_account(prices=None):
+    return FakeBroker(
+        equity=Decimal("100000"), cash=Decimal("100000"), last_equity=Decimal("100000"),
+        prices=prices or {"NVDA": Decimal("180"), "SPY": Decimal("500"), "AAPL": Decimal("200")},
+    )
+
+
+def test_capital_cap_measures_position_pct_against_cap(risk_config):
+    """$100k account, $1,000 cap: a $360 buy is 36% of the *cap* → rejected, even though it's 0.4% of equity."""
+    cfg = replace(risk_config, capital_cap=Decimal("1000"))
+    snap = make_snapshot(_big_paper_account(), universe=("NVDA", "SPY", "AAPL"))
+    res = risk.evaluate([order("NVDA", Side.BUY, "2", "180")], snap, cfg)
+    assert not res[0].accepted and "of capital, cap is 25%" in _reasons(res)
+
+
+def test_capital_cap_limits_total_deployed(risk_config):
+    """Three $300 buys pass individually ($900); the fourth would push deployed capital to $1,200."""
+    cfg = replace(risk_config, capital_cap=Decimal("1000"), max_orders_per_proposal=10, max_position_pct=Decimal("0.5"))
+    b = _big_paper_account({"NVDA": Decimal("300"), "SPY": Decimal("300"), "AAPL": Decimal("300"), "MSFT": Decimal("300")})
+    snap = make_snapshot(b, universe=("NVDA", "SPY", "AAPL", "MSFT"))
+    orders = [order(s, Side.BUY, "1", "300") for s in ("NVDA", "SPY", "AAPL", "MSFT")]
+    res = risk.evaluate(orders, snap, cfg)
+    assert [r.accepted for r in res] == [True, True, True, False]
+    assert "capital cap is $1000" in _reasons(res, 3)
+
+
+def test_capital_cap_counts_existing_positions(risk_config):
+    """Already holding $900 → only $100 more may be deployed."""
+    cfg = replace(risk_config, capital_cap=Decimal("1000"))
+    b = FakeBroker(
+        equity=Decimal("100000"), cash=Decimal("99100"), last_equity=Decimal("100000"),
+        positions=(position("SPY", "1.8", "500"),),
+        prices={"SPY": Decimal("500"), "NVDA": Decimal("180")},
+    )
+    snap = make_snapshot(b, universe=("SPY", "NVDA"))
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "180")], snap, cfg)  # $180 > $100 headroom
+    assert not res[0].accepted and "capital cap" in _reasons(res)
+
+
+def test_no_cap_uses_full_equity(risk_config):
+    cfg = replace(risk_config, capital_cap=None)
+    snap = make_snapshot(_big_paper_account(), universe=("NVDA", "SPY", "AAPL"))
+    res = risk.evaluate([order("NVDA", Side.BUY, "2", "180")], snap, cfg)  # $360 on $100k: fine
+    assert res[0].accepted, res[0].reasons

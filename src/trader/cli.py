@@ -173,7 +173,7 @@ def cmd_approve(args: argparse.Namespace) -> int:
 def cmd_snapshot(args: argparse.Namespace) -> int:
     s = load_settings()
     broker = _broker(s)
-    snap = take_snapshot(broker, broker, s.universe, s.history_days)
+    snap = take_snapshot(broker, broker, s.universe, s.history_days, s.risk.capital_cap)
     print(to_json(snap.to_json_dict()))
     return 0
 

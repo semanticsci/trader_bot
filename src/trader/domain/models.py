@@ -132,6 +132,20 @@ class MarketSnapshot:
     quotes: dict[str, Quote]
     indicators: dict[str, Indicators]
     universe: tuple[str, ...]
+    # The most capital the strategy may deploy (see RiskConfig.capital_cap). Shown to the brain so
+    # it sizes positions against the *budget*, not the whole account. None = whole account.
+    capital_cap: Money | None = None
+
+    @property
+    def capital_base(self) -> Money:
+        """Equity the percentage rules are measured against: min(equity, capital_cap)."""
+        eq = self.account.equity
+        return min(eq, self.capital_cap) if self.capital_cap is not None else eq
+
+    @property
+    def invested(self) -> Money:
+        """Market value of everything currently held."""
+        return sum((p.market_value for p in self.account.positions), Decimal("0"))
 
     def to_json_dict(self) -> dict[str, Any]:
         """A JSON-safe dict (Decimals become strings, datetimes become ISO)."""
@@ -236,6 +250,10 @@ class BrokerOrder:
 class RiskConfig:
     """Hard limits enforced by the gate. Mirrors ``[risk]`` in config.toml."""
 
+    # Hard ceiling on capital deployed (sum of position values + new buys). Percentage rules are
+    # measured against min(equity, capital_cap), so a $100k paper account can honestly simulate a
+    # $1,000 one. None = no cap, use full equity.
+    capital_cap: Money | None = None
     max_position_pct: Decimal = Decimal("0.25")
     max_order_notional: Money = Decimal("400")
     max_orders_per_proposal: int = 3
