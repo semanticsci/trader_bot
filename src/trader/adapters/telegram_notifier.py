@@ -14,6 +14,7 @@ stranger who finds the bot gets a polite refusal and is logged.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,11 +46,12 @@ class Tap:
 
 
 class TelegramNotifier:
-    def __init__(self, token: str, chat_id: str, *, timeout: float = 30.0) -> None:
+    def __init__(self, token: str, chat_id: str, *, timeout: float = 30.0, max_attempts: int = 3) -> None:
         if not token or not chat_id:
             raise ValueError("Telegram token and chat_id are required (see .env.example).")
         self.token = token
         self.chat_id = str(chat_id)
+        self.max_attempts = max_attempts
         self._http = httpx.Client(timeout=timeout)
 
     # ------------------------------------------------------------------ outbound
@@ -124,13 +126,29 @@ class TelegramNotifier:
     # ------------------------------------------------------------------ plumbing
 
     def _call(self, method: str, payload: dict[str, Any], timeout: float | None = None) -> Any:
+        """POST one Bot API method. Retries transient transport errors (connection resets,
+        timeouts) a few times with backoff — a proposal that is journaled but never delivered
+        would otherwise just expire unseen. Telegram-side errors (bad token, bad chat) are not
+        retried. The token is in the URL, so we never log the URL."""
         url = API.format(token=self.token, method=method)
-        resp = self._http.post(url, json=payload, timeout=timeout or self._http.timeout)
-        data = resp.json()
-        if not data.get("ok"):
-            log.error("telegram %s failed: %s", method, data.get("description"))
-            raise httpx.HTTPError(f"telegram {method}: {data.get('description')}")
-        return data.get("result")
+        last_exc: Exception | None = None
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                resp = self._http.post(url, json=payload, timeout=timeout or self._http.timeout)
+                data = resp.json()
+            except httpx.TransportError as exc:  # network-level: reset, timeout, DNS
+                last_exc = exc
+                if attempt < self.max_attempts:
+                    delay = 1.5 * attempt
+                    log.warning("telegram %s: transport error (%s), retry %d/%d in %.1fs",
+                                method, type(exc).__name__, attempt, self.max_attempts, delay)
+                    time.sleep(delay)
+                continue
+            if not data.get("ok"):
+                log.error("telegram %s failed: %s", method, data.get("description"))
+                raise httpx.HTTPError(f"telegram {method}: {data.get('description')}")
+            return data.get("result")
+        raise httpx.HTTPError(f"telegram {method}: gave up after {self.max_attempts} attempts ({last_exc})")
 
 
 # ---------------------------------------------------------------------- pure helpers (tested)

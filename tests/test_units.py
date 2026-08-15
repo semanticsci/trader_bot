@@ -159,3 +159,55 @@ def test_httpx_url_logging_is_silenced_even_when_verbose():
     configure_logging(verbose=True)
     assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
     assert not logging.getLogger("httpcore").isEnabledFor(logging.INFO)
+
+
+# ---------------------------------------------------------------- telegram transport retries
+
+
+def test_telegram_call_retries_transient_errors(monkeypatch):
+    """A connection reset on the first try must not lose the message."""
+    import httpx
+
+    from trader.adapters.telegram_notifier import TelegramNotifier
+
+    tn = TelegramNotifier("t", "1", max_attempts=3)
+    calls = {"n": 0}
+
+    class Resp:
+        def json(self):
+            return {"ok": True, "result": {"message_id": 42}}
+
+    def flaky_post(url, json=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("Connection reset by peer")
+        return Resp()
+
+    monkeypatch.setattr(tn._http, "post", flaky_post)
+    monkeypatch.setattr("trader.adapters.telegram_notifier.time.sleep", lambda s: None)
+    assert tn._call("sendMessage", {})["message_id"] == 42
+    assert calls["n"] == 2
+
+
+def test_telegram_call_does_not_retry_api_errors(monkeypatch):
+    """A 'chat not found' from Telegram is not transient — fail fast, once."""
+    import httpx
+    import pytest
+
+    from trader.adapters.telegram_notifier import TelegramNotifier
+
+    tn = TelegramNotifier("t", "1", max_attempts=3)
+    calls = {"n": 0}
+
+    class Resp:
+        def json(self):
+            return {"ok": False, "description": "Bad Request: chat not found"}
+
+    def post(url, json=None, timeout=None):
+        calls["n"] += 1
+        return Resp()
+
+    monkeypatch.setattr(tn._http, "post", post)
+    with pytest.raises(httpx.HTTPError):
+        tn._call("sendMessage", {})
+    assert calls["n"] == 1
