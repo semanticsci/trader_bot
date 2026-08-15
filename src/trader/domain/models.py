@@ -200,12 +200,35 @@ class ProposedOrder:
 
 
 @dataclass(frozen=True)
+class CancelRequest:
+    """Ask to cancel an open (unfilled) order at the broker — e.g. to rotate out of it."""
+
+    broker_order_id: str
+    reason: str
+    # Filled in by the gate from the snapshot so the human sees what is being cancelled.
+    symbol: str = ""
+    side: Side | None = None
+    qty: Decimal = Decimal("0")
+    limit_price: Money | None = None
+
+    def describe(self) -> str:
+        if not self.symbol:
+            return f"CANCEL order {self.broker_order_id[:8]}…"
+        side = self.side.value.upper() if self.side else "?"
+        return (
+            f"CANCEL {side} {self.qty.normalize()} {self.symbol} @ ${self.limit_price} "
+            f"(id {self.broker_order_id[:8]}…)"
+        )
+
+
+@dataclass(frozen=True)
 class Decision:
     """What came back from the brain, before the gate looked at it."""
 
     orders: tuple[ProposedOrder, ...]
     summary: str  # one-paragraph market read, shown to the human
     raw: str = ""  # the raw model output, kept for the journal
+    cancels: tuple[CancelRequest, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -236,6 +259,8 @@ class Proposal:
     telegram_message_id: int | None = None
     snapshot: dict[str, Any] = field(default_factory=dict)  # MarketSnapshot.to_json_dict()
     decision_raw: str = ""
+    cancels: tuple[CancelRequest, ...] = ()  # accepted cancels (validated against open orders)
+    rejected_cancels: tuple[tuple[CancelRequest, str], ...] = ()  # (request, reason)
 
     @staticmethod
     def new_id() -> str:

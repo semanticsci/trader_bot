@@ -215,3 +215,104 @@ def test_idempotent_resubmit_does_not_duplicate(broker):
 def test_position_helper():
     p = position("AAPL", "2", "200")
     assert p.market_value == Decimal("400")
+
+
+# ---------------------------------------------------------------- cancels: rotate out of an unfilled order
+
+
+def _open(symbol, side, qty, price, oid):
+    from trader.domain.models import BrokerOrder
+    return BrokerOrder(oid, symbol, side, Decimal(qty), Decimal(price), "accepted")
+
+
+def test_cancel_frees_capital_and_is_executed_on_tap(risk_config):
+    """$1,000 cap, $949 pending. Buying $200 AMD only passes if the $239 SPY orders are cancelled first."""
+    from dataclasses import replace
+
+    from trader.domain.models import CancelRequest
+
+    cfg = replace(risk_config, capital_cap=Decimal("1000"), min_cash_buffer_pct=Decimal("0"))
+    b = FakeBroker(
+        equity=Decimal("100000"), cash=Decimal("100000"), last_equity=Decimal("100000"),
+        prices={"SPY": Decimal("776"), "AMD": Decimal("514"), "NVDA": Decimal("225"), "MSFT": Decimal("495"),
+                "QQQ": Decimal("731"), "AMZN": Decimal("263")},
+    )
+    b.open_orders = [
+        _open("NVDA", Side.BUY, "0.89", "224.03", "o-nvda"), _open("MSFT", Side.BUY, "0.4", "492.87", "o-msft"),
+        _open("SPY", Side.BUY, "0.25", "772.15", "o-spy1"), _open("SPY", Side.BUY, "0.06", "772.15", "o-spy2"),
+        _open("QQQ", Side.BUY, "0.34", "727.35", "o-qqq"), _open("AMZN", Side.BUY, "0.43", "261.33", "o-amzn"),
+    ]
+    journal = SqliteJournal(":memory:")
+    notifier = FakeNotifier()
+    amd = ProposedOrder("AMD", Side.BUY, Decimal("0.39"), Decimal("511.83"), "strongest 5d momentum")
+
+    class RotatingDecider:
+        def decide(self, snapshot, strategy):
+            return Decision(orders=(amd,), summary="rotate SPY -> AMD", raw="{}",
+                            cancels=(CancelRequest("o-spy1", "dead weight"), CancelRequest("o-spy2", "dead weight"),
+                                     CancelRequest("o-nope", "typo")))
+
+    propose = ProposeDeps(broker=b, data=b, decider=RotatingDecider(), journal=journal, notifier=notifier,
+                          risk_config=cfg, universe=("SPY", "AMD", "NVDA", "MSFT", "QQQ", "AMZN"), history_days=30,
+                          mode="paper", strategy_prompt="", halted=False)
+    approve = ApproveDeps(broker=b, data=b, journal=journal, notifier=notifier, risk_config=cfg,
+                          universe=("SPY", "AMD", "NVDA", "MSFT", "QQQ", "AMZN"), history_days=30, allowed_chat_id=CHAT)
+
+    proposal = run_propose(propose)
+
+    # gate: both real cancels accepted (enriched with symbol/qty), the typo rejected, and the AMD buy passes
+    assert [c.symbol for c in proposal.cancels] == ["SPY", "SPY"] and proposal.cancels[0].qty == Decimal("0.25")
+    assert len(proposal.rejected_cancels) == 1 and "no open order" in proposal.rejected_cancels[0][1]
+    assert [o.symbol for o in proposal.accepted] == ["AMD"], proposal.rejected
+    stored = journal.get_proposal(proposal.id)
+    assert [c.broker_order_id for c in stored.cancels] == ["o-spy1", "o-spy2"]
+
+    # tap: cancels executed at the broker, then AMD submitted
+    outcome = handle_tap(Tap(9, CHAT, "approve", proposal.id, "", "cq9"), approve)
+    assert outcome.action == "submitted" and outcome.submitted == 1
+    assert b.cancelled == ["o-spy1", "o-spy2"]
+    assert [o.symbol for o in b.submitted] == ["AMD"]
+    assert not any(o.symbol == "SPY" for o in b.open_orders)
+
+
+def test_buy_without_cancel_is_rejected_when_cap_is_full(risk_config):
+    """Same book, no cancel → the AMD buy breaks the cap and the gate says so."""
+    from dataclasses import replace
+
+    from .conftest import make_snapshot
+
+    cfg = replace(risk_config, capital_cap=Decimal("1000"), min_cash_buffer_pct=Decimal("0"))
+    b = FakeBroker(equity=Decimal("100000"), cash=Decimal("100000"), prices={"SPY": Decimal("776"), "AMD": Decimal("514")})
+    b.open_orders = [_open("SPY", Side.BUY, "1.2", "772.15", "o-spy")]  # ~$927 pending
+    snap = replace(make_snapshot(b, universe=("SPY", "AMD")), open_orders=tuple(b.open_orders))
+    from trader.domain import risk
+    res = risk.evaluate([ProposedOrder("AMD", Side.BUY, Decimal("0.39"), Decimal("511.83"), "x")], snap, cfg)
+    assert not res[0].accepted and "capital cap" in " ".join(res[0].reasons)
+
+
+def test_stale_cancel_at_tap_time_is_reported_not_fatal(risk_config):
+    """If the order filled between proposal and tap, the cancel is skipped with a reason; the rest proceeds."""
+    from dataclasses import replace
+
+    from trader.domain.models import CancelRequest
+
+    cfg = replace(risk_config, capital_cap=Decimal("1000"), min_cash_buffer_pct=Decimal("0"))
+    b = FakeBroker(equity=Decimal("100000"), cash=Decimal("100000"), prices={"SPY": Decimal("776"), "AMD": Decimal("514")})
+    b.open_orders = [_open("SPY", Side.BUY, "0.25", "772.15", "o-spy")]
+    journal = SqliteJournal(":memory:")
+    notifier = FakeNotifier()
+
+    class D:
+        def decide(self, s, st):
+            return Decision(orders=(ProposedOrder("AMD", Side.BUY, Decimal("0.2"), Decimal("511.83"), "mo"),),
+                            summary="", raw="{}", cancels=(CancelRequest("o-spy", "rotate"),))
+
+    propose = ProposeDeps(broker=b, data=b, decider=D(), journal=journal, notifier=notifier, risk_config=cfg,
+                          universe=("SPY", "AMD"), history_days=30, mode="paper", strategy_prompt="", halted=False)
+    approve = ApproveDeps(broker=b, data=b, journal=journal, notifier=notifier, risk_config=cfg,
+                          universe=("SPY", "AMD"), history_days=30, allowed_chat_id=CHAT)
+    proposal = run_propose(propose)
+    b.open_orders = []  # ...it filled in the meantime
+    outcome = handle_tap(Tap(10, CHAT, "approve", proposal.id, "", "cq10"), approve)
+    assert outcome.action == "submitted" and b.cancelled == [] and [o.symbol for o in b.submitted] == ["AMD"]
+    assert any("Could not cancel" in s for s in notifier.sent)

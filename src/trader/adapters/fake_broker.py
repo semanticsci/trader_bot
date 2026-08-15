@@ -47,6 +47,7 @@ class FakeBroker:
         self.submitted: list[BrokerOrder] = []
         self.client_order_ids: set[str] = set()
         self.open_orders: list[BrokerOrder] = []  # tests can pre-load pending orders here
+        self.cancelled: list[str] = []
 
     # BrokerPort
     def get_account(self) -> Account:
@@ -80,6 +81,13 @@ class FakeBroker:
 
     def get_open_orders(self) -> list[BrokerOrder]:
         return list(self.open_orders)
+
+    def cancel_order(self, broker_order_id: str) -> None:
+        before = len(self.open_orders)
+        self.open_orders = [o for o in self.open_orders if o.broker_order_id != broker_order_id]
+        if len(self.open_orders) == before:
+            raise ValueError(f"order {broker_order_id} is not open")
+        self.cancelled.append(broker_order_id)
 
     # MarketDataPort
     def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:

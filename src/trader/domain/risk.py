@@ -17,6 +17,7 @@ from decimal import Decimal
 
 from trader.domain.models import (
     Account,
+    CancelRequest,
     GateResult,
     MarketSnapshot,
     ProposedOrder,
@@ -25,12 +26,42 @@ from trader.domain.models import (
 )
 
 
+def evaluate_cancels(
+    cancels: list[CancelRequest] | tuple[CancelRequest, ...],
+    snapshot: MarketSnapshot,
+) -> tuple[list[CancelRequest], list[tuple[CancelRequest, str]]]:
+    """Validate cancel requests against the broker's open orders.
+
+    Returns (accepted, rejected-with-reason). Accepted cancels are enriched with the order's
+    symbol/side/qty/limit so the human sees exactly what goes away.
+    """
+    open_by_id = {o.broker_order_id: o for o in snapshot.open_orders}
+    accepted: list[CancelRequest] = []
+    rejected: list[tuple[CancelRequest, str]] = []
+    seen: set[str] = set()
+    for c in cancels:
+        o = open_by_id.get(c.broker_order_id)
+        if o is None:
+            rejected.append((c, "no open order with that id (already filled, cancelled, or a typo)"))
+        elif c.broker_order_id in seen:
+            rejected.append((c, "duplicate cancel"))
+        elif not c.reason.strip():
+            rejected.append((c, "no reason given"))
+        else:
+            seen.add(c.broker_order_id)
+            accepted.append(
+                CancelRequest(c.broker_order_id, c.reason, o.symbol, o.side, o.qty - o.filled_qty, o.limit_price)
+            )
+    return accepted, rejected
+
+
 def evaluate(
     orders: list[ProposedOrder] | tuple[ProposedOrder, ...],
     snapshot: MarketSnapshot,
     config: RiskConfig,
     *,
     halted: bool = False,
+    cancels: tuple[CancelRequest, ...] | list[CancelRequest] = (),
 ) -> list[GateResult]:
     """Run every proposed order through every rule.
 
@@ -43,12 +74,20 @@ def evaluate(
         snapshot: the market/account state the brain saw.
         config: hard limits from config.toml.
         halted: True if the kill-switch file exists — rejects everything.
+        cancels: already-validated cancels in the same proposal; the capital they free up is
+            available to the buys evaluated here.
     """
     account = snapshot.account
     results: list[GateResult] = []
     accepted_count = 0
-    # Buys already sitting at the broker (unfilled) are committed capital — count them from the start.
-    cash_committed = snapshot.pending_buy_notional
+    # Buys already sitting at the broker (unfilled) are committed capital — count them from the
+    # start, minus anything this proposal cancels.
+    cancelled_ids = {c.broker_order_id for c in cancels}
+    cash_committed = sum(
+        ((o.qty - o.filled_qty) * (o.limit_price or Decimal("0"))
+         for o in snapshot.open_orders if o.side is Side.BUY and o.broker_order_id not in cancelled_ids),
+        Decimal("0"),
+    )
     # Percentage rules are measured against the capital *budget*, not necessarily the whole account
     # (a $100k paper account simulating $1,000 — see RiskConfig.capital_cap).
     capital_cap = config.capital_cap if config.capital_cap is not None else snapshot.capital_cap
@@ -58,6 +97,8 @@ def evaluate(
     projected_value: dict[str, Decimal] = {p.symbol: p.market_value for p in account.positions}
     projected_qty: dict[str, Decimal] = {p.symbol: p.qty for p in account.positions}
     for o in snapshot.open_orders:  # pending buys add exposure; pending sells reduce what's sellable
+        if o.broker_order_id in cancelled_ids:
+            continue
         remaining = o.qty - o.filled_qty
         if o.side is Side.BUY:
             pending_value = remaining * (o.limit_price or Decimal("0"))

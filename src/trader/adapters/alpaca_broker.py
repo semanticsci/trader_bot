@@ -94,6 +94,10 @@ class AlpacaBroker:
         req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=200)
         return [self._to_broker_order(o) for o in self._trading.get_orders(req)]
 
+    def cancel_order(self, broker_order_id: str) -> None:
+        log.info("cancelling order %s (paper=%s)", broker_order_id, self.paper)
+        self._trading.cancel_order_by_id(broker_order_id)
+
     # ------------------------------------------------------------------ MarketDataPort
 
     def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:

@@ -43,7 +43,10 @@ def run_propose(deps: ProposeDeps) -> Proposal:
     decision = deps.decider.decide(snapshot, deps.strategy_prompt)
     log.info("brain proposed %d order(s)", len(decision.orders))
 
-    results = risk.evaluate(decision.orders, snapshot, deps.risk_config, halted=deps.halted)
+    ok_cancels, bad_cancels = risk.evaluate_cancels(decision.cancels, snapshot)
+    for c, why in bad_cancels:
+        log.info("  rejected cancel %s: %s", c.describe(), why)
+    results = risk.evaluate(decision.orders, snapshot, deps.risk_config, halted=deps.halted, cancels=ok_cancels)
     log.info("gate: %s", risk.summarize(results))
     for r in results:
         if not r.accepted:
@@ -51,6 +54,8 @@ def run_propose(deps: ProposeDeps) -> Proposal:
 
     accepted = tuple(r.order for r in results if r.accepted)
     rejected = tuple(r for r in results if not r.accepted)
+    if deps.halted:
+        ok_cancels = []  # nothing at all while halted; the human can cancel by hand
     now = utcnow()
     proposal = Proposal(
         id=Proposal.new_id(),
@@ -60,9 +65,11 @@ def run_propose(deps: ProposeDeps) -> Proposal:
         accepted=accepted,
         rejected=rejected,
         summary=decision.summary,
-        status=ProposalStatus.PENDING if accepted else ProposalStatus.EMPTY,
+        status=ProposalStatus.PENDING if (accepted or ok_cancels) else ProposalStatus.EMPTY,
         snapshot=snapshot.to_json_dict(),
         decision_raw=decision.raw,
+        cancels=tuple(ok_cancels),
+        rejected_cancels=tuple(bad_cancels),
     )
 
     deps.journal.save_proposal(proposal)

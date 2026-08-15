@@ -19,6 +19,7 @@ from typing import Any
 
 from trader.domain.models import (
     BrokerOrder,
+    CancelRequest,
     GateResult,
     Proposal,
     ProposalStatus,
@@ -77,12 +78,21 @@ class SqliteJournal:
         self._conn = sqlite3.connect(str(self.path), detect_types=0, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        # Additive migrations: columns that arrived after the first release.
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(proposals)")}
+        if "cancels_json" not in cols:
+            self._conn.execute("ALTER TABLE proposals ADD COLUMN cancels_json TEXT NOT NULL DEFAULT '[]'")
+        if "rejected_cancels_json" not in cols:
+            self._conn.execute("ALTER TABLE proposals ADD COLUMN rejected_cancels_json TEXT NOT NULL DEFAULT '[]'")
 
     # ------------------------------------------------------------------ proposals
 
     def save_proposal(self, p: Proposal) -> None:
         self._conn.execute(
-            """INSERT INTO proposals VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """INSERT INTO proposals (id, created_at, expires_at, mode, status, telegram_message_id, summary,
+                                      accepted_json, rejected_json, snapshot_json, decision_raw,
+                                      cancels_json, rejected_cancels_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
                  status=excluded.status,
                  telegram_message_id=excluded.telegram_message_id""",
@@ -103,6 +113,8 @@ class SqliteJournal:
                 ),
                 json.dumps(p.snapshot, sort_keys=True),
                 p.decision_raw,
+                to_json([_cancel_dict(c) for c in p.cancels]),
+                to_json([{"cancel": _cancel_dict(c), "reason": why} for c, why in p.rejected_cancels]),
             ),
         )
 
@@ -205,6 +217,22 @@ def _order_dict(o: ProposedOrder) -> dict[str, Any]:
     }
 
 
+def _cancel_dict(c: CancelRequest) -> dict[str, Any]:
+    return {
+        "broker_order_id": c.broker_order_id, "reason": c.reason, "symbol": c.symbol,
+        "side": c.side.value if c.side else None, "qty": str(c.qty),
+        "limit_price": str(c.limit_price) if c.limit_price is not None else None,
+    }
+
+
+def _dict_cancel(d: dict[str, Any]) -> CancelRequest:
+    return CancelRequest(
+        broker_order_id=d["broker_order_id"], reason=d.get("reason", ""), symbol=d.get("symbol", ""),
+        side=Side(d["side"]) if d.get("side") else None, qty=Decimal(d.get("qty", "0")),
+        limit_price=Decimal(d["limit_price"]) if d.get("limit_price") else None,
+    )
+
+
 def _dict_order(d: dict[str, Any]) -> ProposedOrder:
     return ProposedOrder(
         symbol=d["symbol"],
@@ -231,6 +259,10 @@ def _row_to_proposal(r: sqlite3.Row) -> Proposal:
         telegram_message_id=r["telegram_message_id"],
         snapshot=json.loads(r["snapshot_json"]),
         decision_raw=r["decision_raw"],
+        cancels=tuple(_dict_cancel(d) for d in json.loads(r["cancels_json"] or "[]")),
+        rejected_cancels=tuple(
+            (_dict_cancel(d["cancel"]), d["reason"]) for d in json.loads(r["rejected_cancels_json"] or "[]")
+        ),
     )
 
 

@@ -59,7 +59,7 @@ class TelegramNotifier:
     def send_proposal(self, proposal: Proposal) -> int | None:
         text = format_proposal(proposal)
         buttons = None
-        if proposal.accepted and proposal.status is ProposalStatus.PENDING:
+        if (proposal.accepted or proposal.cancels) and proposal.status is ProposalStatus.PENDING:
             buttons = {
                 "inline_keyboard": [
                     [
@@ -191,15 +191,26 @@ def format_proposal(p: Proposal) -> str:
     lines = [f"<b>Trading proposal — {when}</b>  [{mode}]"]
     if p.summary:
         lines.append(_esc(p.summary))
+    if p.cancels:
+        lines.append("")
+        for c in p.cancels:
+            lines.append(f"<b>🗑 {_esc(c.describe())}</b>")
+            if c.reason:
+                lines.append(f"   <i>{_esc(c.reason)}</i>")
     if p.accepted:
         lines.append("")
         for i, o in enumerate(p.accepted, 1):
             lines.append(f"<b>{i}. {_esc(o.describe())}</b>")
             if o.rationale:
                 lines.append(f"   <i>{_esc(o.rationale)}</i>")
-    else:
+    elif not p.cancels:
         lines.append("")
         lines.append("<i>No orders passed the gate today.</i>")
+    if p.rejected_cancels:
+        lines.append("")
+        lines.append(f"Cancels rejected {len(p.rejected_cancels)}:")
+        for c, why in p.rejected_cancels:
+            lines.append(f" • {_esc(c.describe())} — {_esc(why)}")
     if p.rejected:
         lines.append("")
         lines.append(f"Gate rejected {len(p.rejected)}:")

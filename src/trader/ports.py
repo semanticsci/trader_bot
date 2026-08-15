@@ -45,6 +45,10 @@ class BrokerPort(Protocol):
         """Orders accepted by the broker but not yet filled/cancelled (pending exposure)."""
         ...
 
+    def cancel_order(self, broker_order_id: str) -> None:
+        """Cancel an open order. Raises if the broker refuses (e.g. already filled)."""
+        ...
+
 
 class MarketDataPort(Protocol):
     """Prices and history."""

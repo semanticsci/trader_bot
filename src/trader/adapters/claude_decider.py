@@ -21,7 +21,7 @@ from typing import Any
 
 import anthropic
 
-from trader.domain.models import Decision, MarketSnapshot, ProposedOrder, Side, to_json
+from trader.domain.models import CancelRequest, Decision, MarketSnapshot, ProposedOrder, Side, to_json
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +62,20 @@ DECISION_SCHEMA: dict[str, Any] = {
     "required": ["summary", "orders"],
     "additionalProperties": False,
 }
+# Optional: cancels of open orders (by broker_order_id from the snapshot's open_orders list).
+DECISION_SCHEMA["properties"]["cancels"] = {
+    "type": "array",
+    "description": "Open orders to cancel (ids from snapshot.open_orders), e.g. to rotate into a better setup.",
+    "items": {
+        "type": "object",
+        "properties": {
+            "broker_order_id": {"type": "string"},
+            "reason": {"type": "string"},
+        },
+        "required": ["broker_order_id", "reason"],
+        "additionalProperties": False,
+    },
+}
 
 SYSTEM_PROMPT = """You are the decision step of a small, human-approved trading pipeline.
 
@@ -75,6 +89,8 @@ summary for the owner. Rules you must respect (a code-enforced risk gate will al
   * Only trade symbols in the universe or already held.
   * Limit prices must be close to the current price (within ~2%).
   * Never propose selling more than is held. Never propose short sales.
+  * You may cancel open (unfilled) orders listed in snapshot.open_orders by broker_order_id, e.g.
+    to rotate into a better setup or reprice; the capital they free is available to your buys.
   * Every order needs a rationale grounded in the numbers you were given. Do not invent prices,
     news, or events.
   * Quantities and prices are decimal strings.
@@ -100,8 +116,14 @@ def parse_decision(data: dict[str, Any], raw: str = "") -> Decision:
             )
         except (KeyError, ValueError, InvalidOperation) as exc:
             raise ValueError(f"order #{i} is malformed: {exc}") from exc
+    cancels: list[CancelRequest] = []
+    for i, c in enumerate(data.get("cancels", []) or []):
+        try:
+            cancels.append(CancelRequest(str(c["broker_order_id"]).strip(), str(c.get("reason", "")).strip()))
+        except (KeyError, TypeError) as exc:
+            raise ValueError(f"cancel #{i} is malformed: {exc}") from exc
     summary = str(data.get("summary", "")).strip()
-    return Decision(orders=tuple(orders), summary=summary, raw=raw or json.dumps(data))
+    return Decision(orders=tuple(orders), summary=summary, raw=raw or json.dumps(data), cancels=tuple(cancels))
 
 
 class ClaudeDecider:

@@ -146,7 +146,26 @@ def submit_proposal(proposal: Proposal, deps: ApproveDeps) -> TapOutcome:
         return TapOutcome(proposal.id, "skipped", message="halted")
 
     fresh = take_snapshot(deps.broker, deps.data, deps.universe, deps.history_days, deps.risk_config.capital_cap)
-    results = risk.evaluate(proposal.accepted, fresh, deps.risk_config, halted=False)
+
+    # 1) Cancels first — they free capital the buys below may need. Re-validate against the fresh
+    #    open-order list: an order that filled since the proposal can't be cancelled any more.
+    ok_cancels, stale_cancels = risk.evaluate_cancels(proposal.cancels, fresh)
+    cancelled: list[str] = []
+    not_cancelled: list[str] = [f"{c.describe()} — {why}" for c, why in stale_cancels]
+    for c in ok_cancels:
+        try:
+            deps.broker.cancel_order(c.broker_order_id)
+        except Exception as exc:  # noqa: BLE001 — report and keep going
+            log.exception("broker refused cancel %s", c.describe())
+            not_cancelled.append(f"{c.describe()} — broker error: {exc}")
+            deps.journal.log_event("cancel_broker_error", {"proposal_id": proposal.id, "error": str(exc)})
+            continue
+        cancelled.append(c.describe())
+        deps.journal.log_event("order_cancelled", {"proposal_id": proposal.id, "broker_order_id": c.broker_order_id})
+    done_cancels = [c for c in ok_cancels if c.describe() in cancelled]
+
+    # 2) Then the buys/sells, gated on fresh prices with the successful cancels applied.
+    results = risk.evaluate(proposal.accepted, fresh, deps.risk_config, halted=False, cancels=done_cancels)
 
     submitted: list[str] = []
     rejected: list[str] = []
@@ -171,26 +190,34 @@ def submit_proposal(proposal: Proposal, deps: ApproveDeps) -> TapOutcome:
         deps.journal.record_broker_order(proposal.id, bo)
         submitted.append(f"{r.order.describe()} → {bo.status} (id {bo.broker_order_id[:8]}…)")
 
-    proposal.status = ProposalStatus.SUBMITTED if submitted else ProposalStatus.SKIPPED
+    proposal.status = ProposalStatus.SUBMITTED if (submitted or cancelled) else ProposalStatus.SKIPPED
     deps.journal.save_proposal(proposal)
     deps.journal.log_event(
         "proposal_submitted",
-        {"proposal_id": proposal.id, "submitted": len(submitted), "rejected": len(rejected)},
+        {"proposal_id": proposal.id, "submitted": len(submitted), "rejected": len(rejected),
+         "cancelled": len(cancelled), "not_cancelled": len(not_cancelled)},
     )
 
     lines = []
+    if cancelled:
+        lines.append(f"🗑 Cancelled {len(cancelled)}:")
+        lines += [f" • {s}" for s in cancelled]
+    if not_cancelled:
+        lines.append(f"⚠️ Could not cancel {len(not_cancelled)}:")
+        lines += [f" • {s}" for s in not_cancelled]
     if submitted:
         lines.append(f"✅ Submitted {len(submitted)}:")
         lines += [f" • {s}" for s in submitted]
     if rejected:
         lines.append(f"⚠️ Not submitted {len(rejected)} (re-check on fresh prices):")
         lines += [f" • {s}" for s in rejected]
-    if not submitted and not rejected:
+    if not submitted and not rejected and not cancelled and not not_cancelled:
         lines.append("Nothing to submit.")
-    footer = "✅ Approved" if submitted else "⚠️ Approved, but nothing could be submitted"
+    footer = "✅ Approved" if (submitted or cancelled) else "⚠️ Approved, but nothing could be submitted"
     deps.notifier.update_proposal_message(proposal, footer)
     deps.notifier.send_text("\n".join(lines))
-    return TapOutcome(proposal.id, "submitted" if submitted else "skipped", len(submitted), len(rejected))
+    action = "submitted" if (submitted or cancelled) else "skipped"
+    return TapOutcome(proposal.id, action, len(submitted), len(rejected), message=f"cancelled={len(cancelled)}")
 
 
 def expire_stale(deps: ApproveDeps) -> None:
