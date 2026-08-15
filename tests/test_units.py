@@ -1,0 +1,147 @@
+"""Small pure-function tests: indicators, Telegram parsing, decision parsing, journal, config."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+
+from trader.adapters.claude_decider import parse_decision
+from trader.adapters.sqlite_journal import SqliteJournal
+from trader.adapters.telegram_notifier import classify_text, format_proposal, parse_update
+from trader.config import ConfigError, load_settings
+from trader.domain.indicators import compute_indicators, pct_change, sma
+from trader.domain.models import Bar, Proposal, ProposalStatus, ProposedOrder, Side, utcnow
+
+# ---------------------------------------------------------------- indicators
+
+
+def _bars(closes: list[int]) -> list[Bar]:
+    return [Bar(f"2026-01-{i + 1:02d}", Decimal(c), Decimal(c + 1), Decimal(c - 1), Decimal(c), 100) for i, c in enumerate(closes)]
+
+
+def test_sma_needs_enough_data():
+    assert sma([Decimal(1), Decimal(2)], 3) is None
+    assert sma([Decimal(1), Decimal(2), Decimal(3)], 3) == Decimal("2.00")
+
+
+def test_pct_change():
+    assert pct_change(Decimal("110"), Decimal("100")) == Decimal("0.1000")
+    assert pct_change(Decimal("1"), Decimal("0")) is None
+
+
+def test_compute_indicators_partial_history():
+    ind = compute_indicators(_bars(list(range(100, 110))))  # 10 bars only
+    assert ind is not None
+    assert ind.last_close == Decimal("109")
+    assert ind.sma_20 is None and ind.sma_50 is None
+    assert ind.return_5d_pct == pct_change(Decimal(109), Decimal(104))
+
+
+def test_compute_indicators_full():
+    ind = compute_indicators(_bars(list(range(100, 160))))  # 60 bars
+    assert ind.sma_20 == Decimal("149.50")
+    assert ind.high_20d == Decimal("160")  # high = close+1 of last bar (159+1)
+    assert ind.avg_volume_20d == 100
+    assert compute_indicators([]) is None
+
+
+# ---------------------------------------------------------------- telegram parsing
+
+
+def test_parse_callback_approve():
+    upd = {"update_id": 7, "callback_query": {"id": "cq", "data": "approve:abc123", "message": {"chat": {"id": 42}, "message_id": 9}}}
+    tap = parse_update(upd)
+    assert tap.kind == "approve" and tap.proposal_id == "abc123" and tap.chat_id == "42" and tap.update_id == 7
+
+
+def test_parse_text_message():
+    tap = parse_update({"update_id": 8, "message": {"chat": {"id": 42}, "text": " go ", "message_id": 3}})
+    assert tap.kind == "text" and tap.text == "go"
+
+
+def test_parse_ignores_unknown():
+    assert parse_update({"update_id": 9, "edited_message": {}}) is None
+    assert parse_update({"update_id": 10, "callback_query": {"data": "weird"}}) is None
+
+
+@pytest.mark.parametrize("text,expected", [("go", "approve"), ("YES!", "approve"), ("no", "skip"), ("what?", None), ("go ahead", "approve")])
+def test_classify_text(text, expected):
+    assert classify_text(text) == expected
+
+
+def test_format_proposal_mentions_orders_and_id():
+    p = Proposal(
+        id="abc123", created_at=utcnow(), expires_at=utcnow() + timedelta(hours=1), mode="paper",
+        accepted=(ProposedOrder("NVDA", Side.BUY, Decimal("1"), Decimal("180.5"), "why <b>"),),
+        rejected=(), summary="Calm day & up.",
+    )
+    text = format_proposal(p)
+    assert "BUY 1 NVDA" in text and "id:abc123" in text
+    assert "&lt;b&gt;" in text and "&amp;" in text  # HTML-escaped user content
+
+
+# ---------------------------------------------------------------- decision parsing
+
+
+def test_parse_decision_ok():
+    d = parse_decision({"summary": "s", "orders": [{"symbol": "nvda", "side": "buy", "qty": "1.5", "limit_price": "180.10", "rationale": "r"}]})
+    assert d.orders[0].symbol == "NVDA" and d.orders[0].qty == Decimal("1.5")
+
+
+def test_parse_decision_rejects_garbage():
+    with pytest.raises(ValueError):
+        parse_decision({"summary": "s", "orders": [{"symbol": "X", "side": "hold", "qty": "1", "limit_price": "1", "rationale": ""}]})
+    with pytest.raises(ValueError):
+        parse_decision({"summary": "s", "orders": [{"symbol": "X", "side": "buy", "qty": "one", "limit_price": "1", "rationale": ""}]})
+
+
+# ---------------------------------------------------------------- journal
+
+
+def test_journal_roundtrip_and_state(tmp_path: Path):
+    j = SqliteJournal(tmp_path / "j.db")
+    p = Proposal(
+        id="p1", created_at=utcnow(), expires_at=utcnow() + timedelta(hours=1), mode="paper",
+        accepted=(ProposedOrder("NVDA", Side.BUY, Decimal("1"), Decimal("180"), "r"),),
+        rejected=(), summary="s", snapshot={"account": {"equity": "1000"}},
+    )
+    j.save_proposal(p)
+    assert j.latest_pending().id == "p1"
+    p.status = ProposalStatus.SKIPPED
+    j.save_proposal(p)
+    assert j.latest_pending() is None
+    assert j.get_proposal("p1").accepted[0].limit_price == Decimal("180")
+    assert j.get_state("x") is None
+    j.set_state("x", "1")
+    j.set_state("x", "2")
+    assert j.get_state("x") == "2"
+    j.log_event("test", {"a": Decimal("1.5")})
+    assert j.list_events(utcnow() - timedelta(minutes=1))[0][1] == "test"
+
+
+# ---------------------------------------------------------------- config safety
+
+
+def test_live_requires_confirmation_phrase(tmp_path: Path, monkeypatch):
+    (tmp_path / "config.toml").write_text("[risk]\n[universe]\nsymbols=['SPY']\n")
+    monkeypatch.setenv("ALPACA_API_KEY", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    monkeypatch.setenv("ALPACA_PAPER", "false")
+    monkeypatch.delenv("TRADER_LIVE_CONFIRM", raising=False)
+    with pytest.raises(ConfigError):
+        load_settings(tmp_path)
+    monkeypatch.setenv("TRADER_LIVE_CONFIRM", "I_UNDERSTAND_THIS_IS_REAL_MONEY")
+    s = load_settings(tmp_path)
+    assert s.is_live and s.universe == ("SPY",)
+
+
+def test_paper_is_default(tmp_path: Path, monkeypatch):
+    (tmp_path / "config.toml").write_text("[risk]\nmax_order_notional=250\n")
+    monkeypatch.setenv("ALPACA_API_KEY", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    monkeypatch.delenv("ALPACA_PAPER", raising=False)
+    s = load_settings(tmp_path)
+    assert s.mode == "paper" and s.risk.max_order_notional == Decimal("250")

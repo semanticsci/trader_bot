@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The approver: long-polls Telegram and submits orders when YOU tap Go ahead.
+         Installed by launchd/install_approver.sh, which fills in __PROJECT_ROOT__. -->
+    <key>Label</key>
+    <string>com.trading-agent.approver</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PROJECT_ROOT__/.venv/bin/trader</string>
+        <string>approve</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_ROOT__</string>
+
+    <!-- Start at login and restart if it ever exits. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>StandardOutPath</key>
+    <string>__PROJECT_ROOT__/data/approver.log</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_ROOT__/data/approver.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>TZ</key>
+        <string>UTC</string>
+    </dict>
+</dict>
+</plist>

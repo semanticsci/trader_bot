@@ -1,0 +1,156 @@
+"""The brain, two ways.
+
+``ClaudeDecider`` calls the Claude API directly and forces a strict JSON reply
+via structured outputs, so parsing can't fail on prose.
+
+``FileDecider`` reads a ``decision.json`` written by *someone else* — for
+example a Claude Code / Cowork scheduled task that ran ``trader snapshot``,
+reasoned about it, and wrote the file. Same contract, no API key needed.
+
+Either way, the output is a ``Decision`` and the risk gate treats it identically.
+The brain never talks to the broker.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Any
+
+import anthropic
+
+from trader.domain.models import Decision, MarketSnapshot, ProposedOrder, Side, to_json
+
+log = logging.getLogger(__name__)
+
+# The JSON shape the brain must return. Kept as a plain dict so it can be shown
+# in docs and reused by FileDecider validation.
+DECISION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {
+            "type": "string",
+            "description": (
+                "2-4 sentences: your read of the market and the account today, written for the account owner."
+            ),
+        },
+        "orders": {
+            "type": "array",
+            "description": "Zero or more limit orders. Empty is a perfectly good answer.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string"},
+                    "side": {"type": "string", "enum": ["buy", "sell"]},
+                    "qty": {
+                        "type": "string",
+                        "description": "Number of shares as a decimal string, e.g. '2' or '0.75'.",
+                    },
+                    "limit_price": {"type": "string", "description": "Limit price as a decimal string, e.g. '181.20'."},
+                    "rationale": {
+                        "type": "string",
+                        "description": "One or two sentences on why, referencing the data you were given.",
+                    },
+                },
+                "required": ["symbol", "side", "qty", "limit_price", "rationale"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["summary", "orders"],
+    "additionalProperties": False,
+}
+
+SYSTEM_PROMPT = """You are the decision step of a small, human-approved trading pipeline.
+
+You will be given:
+  1. A STRATEGY written by the account owner. Follow it. It is their money and their thesis.
+  2. A SNAPSHOT of their account and the market as JSON: equity, cash, positions, current quotes,
+     and simple indicators (20/50-day SMA, 20-day high/low, 5/20-day returns) for a small universe.
+
+Your job: propose zero or more LIMIT orders for today, with a short rationale each, plus a short
+summary for the owner. Rules you must respect (a code-enforced risk gate will also check them):
+  * Only trade symbols in the universe or already held.
+  * Limit prices must be close to the current price (within ~2%).
+  * Never propose selling more than is held. Never propose short sales.
+  * Prefer fewer, better-reasoned orders. Proposing nothing is often correct.
+  * Use the numbers you were given. Do not invent prices, news, or events.
+  * Quantities and prices are decimal strings.
+
+Be plain and honest in the summary. If the strategy's target looks unrealistic given the data,
+say so briefly — the owner wants candor, not cheerleading.
+"""
+
+
+def parse_decision(data: dict[str, Any], raw: str = "") -> Decision:
+    """Turn a dict matching DECISION_SCHEMA into a Decision. Raises ValueError if malformed."""
+    orders: list[ProposedOrder] = []
+    for i, o in enumerate(data.get("orders", []) or []):
+        try:
+            orders.append(
+                ProposedOrder(
+                    symbol=str(o["symbol"]).upper().strip(),
+                    side=Side(str(o["side"]).lower()),
+                    qty=Decimal(str(o["qty"])),
+                    limit_price=Decimal(str(o["limit_price"])),
+                    rationale=str(o.get("rationale", "")).strip(),
+                )
+            )
+        except (KeyError, ValueError, InvalidOperation) as exc:
+            raise ValueError(f"order #{i} is malformed: {exc}") from exc
+    summary = str(data.get("summary", "")).strip()
+    return Decision(orders=tuple(orders), summary=summary, raw=raw or json.dumps(data))
+
+
+class ClaudeDecider:
+    """Calls Claude with the strategy + snapshot and returns a Decision."""
+
+    def __init__(self, model: str = "claude-opus-5", client: anthropic.Anthropic | None = None) -> None:
+        self.model = model
+        # The SDK reads ANTHROPIC_API_KEY from the environment.
+        self._client = client or anthropic.Anthropic()
+
+    def decide(self, snapshot: MarketSnapshot, strategy_prompt: str) -> Decision:
+        user_content = (
+            "## STRATEGY (from the account owner)\n\n"
+            f"{strategy_prompt.strip()}\n\n"
+            "## SNAPSHOT (JSON)\n\n"
+            f"{to_json(snapshot.to_json_dict())}\n\n"
+            "Return your decision as JSON matching the required schema."
+        )
+        log.info("asking %s for a decision (%d chars of context)", self.model, len(user_content))
+        response = self._client.messages.create(
+            model=self.model,
+            max_tokens=4000,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_content}],
+            output_config={"format": {"type": "json_schema", "schema": DECISION_SCHEMA}},
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("the model declined to answer (stop_reason=refusal)")
+        text = next((b.text for b in response.content if b.type == "text"), "")
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"model did not return valid JSON: {exc}\n{text[:500]}") from exc
+        decision = parse_decision(data, raw=text)
+        log.info(
+            "decision: %d order(s); usage in=%s out=%s",
+            len(decision.orders),
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
+        return decision
+
+
+class FileDecider:
+    """Reads a decision.json produced elsewhere (e.g. by a Cowork scheduled agent)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def decide(self, snapshot: MarketSnapshot, strategy_prompt: str) -> Decision:
+        raw = self.path.read_text()
+        return parse_decision(json.loads(raw), raw=raw)

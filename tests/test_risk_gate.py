@@ -1,0 +1,143 @@
+"""The risk gate is the safety net. Every rule gets a test that shows it catching something."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from decimal import Decimal
+
+from trader.adapters.fake_broker import FakeBroker, order, position
+from trader.domain import risk
+from trader.domain.models import Side
+
+from .conftest import make_snapshot
+
+
+def _reasons(results, i=0):
+    return " ".join(results[i].reasons)
+
+
+def test_reasonable_buy_passes(snapshot, risk_config):
+    # Arrange: buy 1 NVDA at $180 in a $1000 account with $600 cash.
+    o = order("NVDA", Side.BUY, "1", "180")
+    # Act
+    res = risk.evaluate([o], snapshot, risk_config)
+    # Assert
+    assert res[0].accepted, res[0].reasons
+
+
+def test_kill_switch_rejects_everything(snapshot, risk_config):
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "180")], snapshot, risk_config, halted=True)
+    assert not res[0].accepted
+    assert "kill switch" in _reasons(res)
+
+
+def test_blocked_symbol(snapshot, risk_config):
+    res = risk.evaluate([order("TQQQ", Side.BUY, "1", "50")], snapshot, risk_config)
+    assert "blocked" in _reasons(res)
+
+
+def test_symbol_outside_universe(snapshot, risk_config):
+    snap = replace(snapshot, universe=("AAPL",))  # NVDA no longer allowed
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "180")], snap, risk_config)
+    assert "not in the configured universe" in _reasons(res)
+
+
+def test_held_symbol_outside_universe_can_still_be_sold(snapshot, risk_config):
+    snap = replace(snapshot, universe=("NVDA",))  # AAPL not in universe but held
+    res = risk.evaluate([order("AAPL", Side.SELL, "1", "200")], snap, risk_config)
+    assert res[0].accepted, res[0].reasons
+
+
+def test_limit_far_from_price_is_rejected(snapshot, risk_config):
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "150")], snapshot, risk_config)  # 16% below
+    assert "looks like a mistake" in _reasons(res)
+
+
+def test_order_notional_cap(snapshot, risk_config):
+    # 3 SPY @ 500 = $1500 > $400 cap (and > cash, and > position cap — several reasons)
+    res = risk.evaluate([order("SPY", Side.BUY, "3", "500")], snapshot, risk_config)
+    assert "max single order" in _reasons(res)
+
+
+def test_position_concentration_cap(snapshot, risk_config):
+    # Already hold $400 of AAPL (40% — over cap already); buying more must be rejected.
+    res = risk.evaluate([order("AAPL", Side.BUY, "1", "200")], snapshot, risk_config)
+    assert "of equity, cap is" in _reasons(res)
+
+
+def test_cash_buffer(risk_config):
+    # Equity 1000, cash 400, buffer 10% = $100 → at most $300 of buys this proposal.
+    # Each order alone is under the 25% concentration cap; together they breach the cash buffer.
+    b = FakeBroker(
+        equity=Decimal("1000"), cash=Decimal("400"), last_equity=Decimal("1000"),
+        positions=(position("AAPL", "3", "200"),),
+        prices={"AAPL": Decimal("200"), "NVDA": Decimal("180"), "SPY": Decimal("500")},
+    )
+    snap = make_snapshot(b, universe=("AAPL", "NVDA", "SPY"))
+    orders = [order("NVDA", Side.BUY, "1.3", "180"), order("SPY", Side.BUY, "0.5", "500")]  # $234 + $250
+    res = risk.evaluate(orders, snap, risk_config)
+    assert res[0].accepted, res[0].reasons
+    assert not res[1].accepted
+    assert "buffer" in _reasons(res, 1)
+
+
+def test_max_orders_per_proposal(snapshot, risk_config):
+    cfg = replace(risk_config, max_orders_per_proposal=1, max_order_notional=Decimal("1000"))
+    orders = [order("NVDA", Side.BUY, "1", "180"), order("SPY", Side.BUY, "0.2", "500")]
+    res = risk.evaluate(orders, snapshot, cfg)
+    assert res[0].accepted
+    assert "more than 1 orders" in _reasons(res, 1)
+
+
+def test_no_shorting(snapshot, risk_config):
+    res = risk.evaluate([order("NVDA", Side.SELL, "1", "180")], snapshot, risk_config)
+    assert "shorting is disabled" in _reasons(res)
+
+
+def test_cannot_sell_more_than_held(snapshot, risk_config):
+    res = risk.evaluate([order("AAPL", Side.SELL, "3", "200")], snapshot, risk_config)
+    assert "would open a short" in _reasons(res)
+
+
+def test_sells_are_cumulative(snapshot, risk_config):
+    # Hold 2 AAPL. Sell 1, then sell 2 → second exceeds what's left.
+    orders = [order("AAPL", Side.SELL, "1", "200"), order("AAPL", Side.SELL, "2", "200")]
+    res = risk.evaluate(orders, snapshot, risk_config)
+    assert res[0].accepted
+    assert not res[1].accepted
+
+
+def test_daily_loss_breaker_blocks_buys_but_allows_sells(risk_config):
+    # Down 5% on the day: equity 950 vs last_equity 1000.
+    b = FakeBroker(
+        equity=Decimal("950"), cash=Decimal("550"), last_equity=Decimal("1000"),
+        positions=(position("AAPL", "2", "200"),),
+        prices={"AAPL": Decimal("200"), "NVDA": Decimal("180")},
+    )
+    snap = make_snapshot(b, universe=("AAPL", "NVDA"))
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "180"), order("AAPL", Side.SELL, "1", "200")], snap, risk_config)
+    assert not res[0].accepted and "breaker" in _reasons(res, 0)
+    assert res[1].accepted
+
+
+def test_fractional_disabled(snapshot, risk_config):
+    cfg = replace(risk_config, allow_fractional=False)
+    res = risk.evaluate([order("NVDA", Side.BUY, "0.5", "180")], snapshot, cfg)
+    assert "fractional" in _reasons(res)
+
+
+def test_missing_rationale_is_rejected(snapshot, risk_config):
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "180", why="  ")], snapshot, risk_config)
+    assert "rationale" in _reasons(res)
+
+
+def test_every_rejection_has_a_reason(snapshot, risk_config):
+    bad = [order("TQQQ", Side.BUY, "-1", "0"), order("NVDA", Side.SELL, "1", "10")]
+    for r in risk.evaluate(bad, snapshot, risk_config):
+        assert not r.accepted
+        assert r.reasons and all(r.reasons)
+
+
+def test_summarize(snapshot, risk_config):
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "180"), order("TQQQ", Side.BUY, "1", "50")], snapshot, risk_config)
+    assert risk.summarize(res) == "1 of 2 passed the risk gate"

@@ -1,0 +1,192 @@
+"""The risk gate: code-enforced limits the brain cannot talk its way past.
+
+This is the most important file in the project. The LLM *proposes*; this
+module *disposes*. Every rule is a plain function that returns a reason string
+when it fails, so a rejection is always explainable to the human ("rejected:
+would make NVDA 31% of equity, cap is 25%").
+
+Design rules for this file:
+  * Pure: no I/O, no clock, no randomness. Everything it needs is passed in.
+  * Conservative: when in doubt, reject. A missed trade costs nothing.
+  * Explainable: every rejection has a human-readable reason.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from trader.domain.models import (
+    Account,
+    GateResult,
+    MarketSnapshot,
+    ProposedOrder,
+    RiskConfig,
+    Side,
+)
+
+
+def evaluate(
+    orders: list[ProposedOrder] | tuple[ProposedOrder, ...],
+    snapshot: MarketSnapshot,
+    config: RiskConfig,
+    *,
+    halted: bool = False,
+) -> list[GateResult]:
+    """Run every proposed order through every rule.
+
+    Orders are evaluated in the order given, and *cumulatively*: if the first
+    two buys use up the cash buffer, the third is rejected even though it
+    would pass on its own. That mirrors what happens at the broker.
+
+    Args:
+        orders: what the brain proposed.
+        snapshot: the market/account state the brain saw.
+        config: hard limits from config.toml.
+        halted: True if the kill-switch file exists — rejects everything.
+    """
+    account = snapshot.account
+    results: list[GateResult] = []
+    accepted_count = 0
+    cash_committed = Decimal("0")  # buys already accepted in this proposal
+    # Position values after the buys/sells accepted so far (symbol -> market value)
+    projected_value: dict[str, Decimal] = {p.symbol: p.market_value for p in account.positions}
+    projected_qty: dict[str, Decimal] = {p.symbol: p.qty for p in account.positions}
+
+    daily_breaker_tripped = account.day_pl_pct <= -config.max_daily_loss_pct
+
+    for order in orders:
+        reasons: list[str] = []
+
+        if halted:
+            reasons.append("kill switch is on (HALT file present) — all orders blocked")
+
+        reasons += _check_shape(order, config)
+        reasons += _check_symbol(order, snapshot, config)
+        reasons += _check_limit_distance(order, snapshot, config)
+
+        if accepted_count >= config.max_orders_per_proposal:
+            reasons.append(f"more than {config.max_orders_per_proposal} orders in one proposal")
+
+        if order.side is Side.BUY:
+            if daily_breaker_tripped:
+                reasons.append(
+                    f"daily-loss breaker tripped: equity is {account.day_pl_pct:.2%} vs "
+                    f"yesterday, limit is -{config.max_daily_loss_pct:.0%} — no new buys today"
+                )
+            reasons += _check_buy_size(
+                order, account, config, cash_committed, projected_value.get(order.symbol, Decimal("0"))
+            )
+        else:
+            reasons += _check_sell(order, projected_qty.get(order.symbol, Decimal("0")), config)
+
+        ok = not reasons
+        results.append(GateResult(order=order, accepted=ok, reasons=tuple(reasons)))
+
+        if ok:
+            accepted_count += 1
+            if order.side is Side.BUY:
+                cash_committed += order.notional
+                projected_value[order.symbol] = (
+                    projected_value.get(order.symbol, Decimal("0")) + order.notional
+                )
+                projected_qty[order.symbol] = projected_qty.get(order.symbol, Decimal("0")) + order.qty
+            else:
+                projected_qty[order.symbol] = projected_qty.get(order.symbol, Decimal("0")) - order.qty
+                projected_value[order.symbol] = max(
+                    Decimal("0"), projected_value.get(order.symbol, Decimal("0")) - order.notional
+                )
+
+    return results
+
+
+# --------------------------------------------------------------------------- individual rules
+# Each returns a list of reasons; empty list means "this rule is happy".
+
+
+def _check_shape(order: ProposedOrder, config: RiskConfig) -> list[str]:
+    reasons = []
+    if order.qty <= 0:
+        reasons.append("quantity must be positive")
+    if order.limit_price <= 0:
+        reasons.append("limit price must be positive")
+    if not config.allow_fractional and order.qty != order.qty.to_integral_value():
+        reasons.append("fractional shares are disabled (allow_fractional = false)")
+    if not order.rationale.strip():
+        reasons.append("no rationale given — the brain must explain every order")
+    return reasons
+
+
+def _check_symbol(order: ProposedOrder, snapshot: MarketSnapshot, config: RiskConfig) -> list[str]:
+    reasons = []
+    sym = order.symbol.upper()
+    if sym in config.blocked_symbols:
+        reasons.append(f"{sym} is on the blocked list")
+    held = snapshot.account.position_for(sym) is not None
+    if sym not in snapshot.universe and not held:
+        reasons.append(f"{sym} is not in the configured universe (and not currently held)")
+    if sym not in snapshot.quotes:
+        reasons.append(f"no current quote for {sym} — refusing to trade blind")
+    return reasons
+
+
+def _check_limit_distance(
+    order: ProposedOrder, snapshot: MarketSnapshot, config: RiskConfig
+) -> list[str]:
+    quote = snapshot.quotes.get(order.symbol.upper())
+    if quote is None or quote.price <= 0:
+        return []  # already rejected by _check_symbol
+    distance = abs(order.limit_price - quote.price) / quote.price
+    if distance > config.max_limit_distance_pct:
+        return [
+            f"limit ${order.limit_price} is {distance:.1%} from current ${quote.price} "
+            f"(max {config.max_limit_distance_pct:.0%}) — looks like a mistake"
+        ]
+    return []
+
+
+def _check_buy_size(
+    order: ProposedOrder,
+    account: Account,
+    config: RiskConfig,
+    cash_already_committed: Decimal,
+    current_symbol_value: Decimal,
+) -> list[str]:
+    reasons = []
+    notional = order.notional
+
+    if notional > config.max_order_notional:
+        reasons.append(f"order is ${notional}, max single order is ${config.max_order_notional}")
+
+    if account.equity > 0:
+        after = current_symbol_value + notional
+        pct = after / account.equity
+        if pct > config.max_position_pct:
+            reasons.append(
+                f"would make {order.symbol} {pct:.0%} of equity, cap is {config.max_position_pct:.0%}"
+            )
+
+    buffer = account.equity * config.min_cash_buffer_pct
+    cash_after = account.cash - cash_already_committed - notional
+    if cash_after < buffer:
+        reasons.append(
+            f"would leave ${cash_after:.2f} cash, below the {config.min_cash_buffer_pct:.0%} "
+            f"buffer (${buffer:.2f})"
+        )
+    return reasons
+
+
+def _check_sell(order: ProposedOrder, held_qty: Decimal, config: RiskConfig) -> list[str]:
+    if held_qty <= 0 and not config.allow_shorting:
+        return [f"you don't hold {order.symbol} and shorting is disabled"]
+    if order.qty > held_qty and not config.allow_shorting:
+        return [
+            f"selling {order.qty.normalize()} but only hold {held_qty.normalize()} "
+            f"{order.symbol} — would open a short"
+        ]
+    return []
+
+
+def summarize(results: list[GateResult]) -> str:
+    """One line for logs and Telegram: '2 of 3 passed; 1 rejected'."""
+    passed = sum(1 for r in results if r.accepted)
+    return f"{passed} of {len(results)} passed the risk gate"

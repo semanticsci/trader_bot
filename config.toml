@@ -1,0 +1,44 @@
+# Non-secret configuration. Safe to commit. Secrets live in `.env`.
+
+[universe]
+# The only symbols the brain is allowed to consider (plus anything you already hold).
+# Keeping the universe small keeps data fetches cheap and reasoning focused.
+symbols = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD"]
+# Benchmark used in reports.
+benchmark = "SPY"
+# How many daily bars of history to feed the brain (for indicators).
+history_days = 60
+
+[risk]
+# --- Everything in this section is enforced IN CODE. The LLM cannot override it. ---
+
+# Largest a single position may be, as a fraction of total equity, AFTER the order fills.
+max_position_pct = 0.25
+# Largest single order, in dollars.
+max_order_notional = 400
+# Most orders the gate will pass in one proposal.
+max_orders_per_proposal = 3
+# Keep at least this fraction of equity in cash (buys that would breach it are rejected).
+min_cash_buffer_pct = 0.10
+# Circuit breaker: if equity is down more than this vs. yesterday's close, block new BUYS today.
+max_daily_loss_pct = 0.03
+# A limit price more than this far from the current price is treated as an LLM mistake.
+max_limit_distance_pct = 0.03
+# Alpaca supports fractional shares. Set false to force whole shares.
+allow_fractional = true
+# Selling more than you own would open a short. Keep false while learning.
+allow_shorting = false
+# A proposal is only valid this long after creation (stale limit prices are dangerous).
+proposal_ttl_hours = 7
+# Symbols the gate will always reject (leveraged ETFs, penny stocks, whatever you decide).
+blocked_symbols = ["TQQQ", "SQQQ", "UVXY", "SPXU"]
+
+[schedule]
+# Informational — the actual schedule lives in your Cowork tasks / launchd. Kept here so the
+# report can say "the plan was 08:30 ET" and the code can compute proposal expiry sensibly.
+propose_local_time = "08:30"
+timezone = "America/New_York"
+
+[goal]
+# Your stated target. The report shows actual vs. this. The code does not chase it.
+weekly_return_target_pct = 5.0
