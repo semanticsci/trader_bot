@@ -3,14 +3,14 @@
 An **educational, human-approved, LLM-assisted trading pipeline**, small enough to read in an
 afternoon and honest enough to learn from.
 
-Every weekday morning it looks at a small brokerage account and a handful of stocks, asks
+Three times each trading day it looks at a small brokerage account and a handful of stocks, asks
 Claude for a plan, runs that plan through a hard-coded risk gate, and sends the survivors to
 your phone. **Nothing happens until you tap "Go ahead."** Then a tiny service on your Mac
 places the orders, and everything — what the model saw, what it said, what the gate blocked,
 what filled — goes into a journal you can study later.
 
 ```
-   08:30            08:31                 08:31              whenever you look         seconds later
+   09:45/12:30/15:00      +1 min              +1 min              whenever you look         seconds later
 ┌──────────┐   ┌───────────┐   ┌────────────────┐   ┌────────────────────┐   ┌────────────────┐
 │ collect  │──▶│  decide   │──▶│  risk gate     │──▶│  Telegram          │──▶│  approver      │
 │ account, │   │ (Claude)  │   │ (code — LLM    │   │  "Go ahead / Skip" │   │ (your Mac)     │
@@ -55,11 +55,12 @@ trader propose              # ...now it sends. Tap Go ahead / Skip.
 ```
 
 Full walk-through with screenshots-in-words: [docs/SETUP.md](docs/SETUP.md).
+Want Claude Code to do most of it with you? [docs/USING_CLAUDE_CODE.md](docs/USING_CLAUDE_CODE.md).
 
 ## Repository map
 
 ```
-STRATEGY.md              ← YOUR words. Given to the brain every morning. Rewrite freely.
+STRATEGY.md              ← YOUR words. Given to the brain at every check-in. Rewrite freely.
 config.toml              ← universe + risk limits + goal. Enforced in code.
 .env(.example)           ← secrets. Never committed.
 src/trader/
@@ -68,10 +69,10 @@ src/trader/
   adapters/              ← Alpaca, Claude, Telegram, SQLite, and a FakeBroker for tests
   app/                   ← use cases: snapshot, propose, approve, report
   cli.py                 ← `trader ...`
-tests/                   ← 46 offline tests; the risk gate has one per rule
+tests/                   ← 51 offline tests; the risk gate has one per rule
 cowork/                  ← prompts for the three Claude Desktop scheduled tasks
 launchd/                 ← the approver as a macOS background service
-docs/                    ← how it works, setup, risk gate, teaching notes
+docs/                    ← how it works, setup, teaching notes, using Claude Code on this repo
 ```
 
 ## Reading order for a newcomer
@@ -87,7 +88,7 @@ docs/                    ← how it works, setup, risk gate, teaching notes
 
 | Command | What it does |
 |---|---|
-| `trader propose [--dry-run] [--decision f.json]` | morning cycle; sends the proposal |
+| `trader propose [--dry-run] [--decision f.json]` | one check-in: collect → decide → gate → journal → send the proposal |
 | `trader approve [--once]` | the approver loop (normally run by launchd) |
 | `trader snapshot` | print what the brain would see, as JSON |
 | `trader status` | account, positions, pending proposal |

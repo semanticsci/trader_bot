@@ -3,7 +3,7 @@
 This is the whole system explained as a narrative. Read it once, then read the code with it
 in mind.
 
-## 08:30 — the morning proposal (`trader propose`)
+## 09:45 (and 12:30, and 15:00) — a proposal check-in (`trader propose`)
 
 Something kicks off `trader propose` — a Claude Desktop scheduled task, a cron line, or you
 typing it. It runs in one process and does five things in order:
@@ -40,7 +40,8 @@ Every proposed order runs through the risk gate. The gate is plain Python with n
 fully unit-tested (`tests/test_risk_gate.py` has one test per rule). Rules include: symbol
 must be in the universe or already held; not on the blocked list; limit price within a few
 percent of the current price; single order under `$max_order_notional`; resulting position
-under `max_position_pct` of equity; keep `min_cash_buffer_pct` in cash; no shorting; no
+under `max_position_pct` of the capital budget (`capital_cap`, e.g. $1,000 even on a $100k paper
+account); total deployed capital under the cap; keep `min_cash_buffer_pct` in cash; no shorting; no
 selling more than you own; at most N orders; and a **daily-loss circuit breaker** — if the
 account is down more than X% vs. yesterday's close, no new buys today. Rules are cumulative
 within a proposal (the third buy is judged after the first two are assumed to fill).
@@ -72,13 +73,13 @@ over and over. There's no public URL, no webhook, no port to open. When an updat
 1. **Is it from you?** If the chat id doesn't match `.env`, it's logged and ignored.
 2. **Which proposal, which action?** A button tap carries `approve:<id>` or `skip:<id>`. A text
    reply like "go" or "no" applies to the latest pending proposal.
-3. **Is it still pending and not expired?** If it expired (default TTL 7 h from creation),
+3. **Is it still pending and not expired?** If it expired (default TTL 3 h from creation),
    the message is edited to say so and nothing is submitted. Stale limit prices are how people
    buy the top.
 4. **Skip?** Status → `skipped`, buttons removed, done.
 5. **Approve?** Status → `approved`, then `submit_proposal`:
    - checks the `HALT` kill-switch file,
-   - takes a **fresh** snapshot and **re-runs the gate** — prices moved since 8:30 and the
+   - takes a **fresh** snapshot and **re-runs the gate** — prices moved since the check-in and the
      gate is cheap; an order that no longer passes is skipped and you're told why,
    - submits each survivor as a **DAY limit order** with a deterministic `client_order_id`
      (`<proposal>-<symbol>-<side>`), so if the process crashes mid-way and retries, the broker

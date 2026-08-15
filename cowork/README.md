@@ -16,8 +16,8 @@ in and `trader propose --dry-run` works.
 Facts about Cowork scheduled tasks worth knowing:
 
 * They run **while the Claude Desktop app is open** and the Mac is awake. If it's closed at
-  8:30, the task runs on next launch. Set the Mac to wake before 8:30 on weekdays if you
-  want the proposal on time (System Settings → Energy / `pmset` — that's a system setting,
+  09:45, the task runs on next launch. Keep the Mac awake 09:30–16:30 ET on weekdays if you
+  want the check-ins on time (System Settings → Energy / `pmset` — that's a system setting,
   so it's yours to change).
 * Each run starts fresh with no memory of past chats — that's why the prompts are
   self-contained and everything they need lives in this repo.

@@ -12,7 +12,7 @@ cd ~/Development/trading-agent
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-python -m pytest        # 46 tests, all offline, ~1 s
+python -m pytest        # 51 tests, all offline, ~1 s
 ```
 
 If the tests pass, the code is fine. Everything from here is credentials and wiring.
@@ -22,8 +22,9 @@ If the tests pass, the code is fine. Everything from here is credentials and wir
 1. Sign up at <https://alpaca.markets>. Choose the free plan.
 2. In the dashboard, switch to **Paper Trading** (top-left toggle).
 3. **API Keys → Generate**. Copy the key and secret somewhere safe *now* — the secret is shown once.
-4. Paper accounts come pre-funded with fake money (often $100k). If you want it to feel like a
-   $1,000 account, the paper dashboard lets you **reset** the account with a custom balance.
+4. Paper accounts come pre-funded with fake money (usually $100k). You don't need to reset it:
+   `config.toml` has `capital_cap = 1000`, and the risk gate measures every size rule against
+   that budget, so the $100k behaves like $1,000. Change the cap to change the budget.
 
 ## 3. Telegram bot
 
@@ -53,9 +54,9 @@ Two options — pick one:
 
 - **API brain (recommended for portability).** Create a key at
   <https://platform.claude.com>, put it in `.env` as `ANTHROPIC_API_KEY`. `trader propose`
-  will call Claude directly. Cost per morning is a few cents.
+  will call Claude directly. Cost per check-in is a few cents.
 - **Agent brain.** Leave the key empty and let a Claude Desktop scheduled task be the brain
-  (`cowork/morning-proposal.md`, "Alternative" section). No API key, but it only works where
+  (`cowork/proposal.md`, "Alternative" section). No API key, but it only works where
   Claude Desktop runs.
 
 ## 6. Your strategy
@@ -93,17 +94,21 @@ anything: `trader halt` (and `trader resume`).
 ## 9. Schedule it (Claude Desktop / Cowork)
 
 Create three scheduled tasks using the prompts in `cowork/`. From a Claude Desktop chat you
-can literally say: *"Create a scheduled task called trading-morning-proposal that runs at 8:30
-on weekdays with this prompt: …"* and paste the file. Or use plain cron:
+can literally say: *"Create a scheduled task called trading-proposal-open that runs at 09:45
+on weekdays with this prompt: …"* and paste `cowork/proposal.md`; repeat for 12:30 and 15:00,
+then the EOD summary and the Sunday review. Or use plain cron:
 
 ```
-30 8 * * 1-5  cd ~/Development/trading-agent && .venv/bin/trader propose >> data/propose.log 2>&1
+45 9  * * 1-5 cd ~/Development/trading-agent && .venv/bin/trader propose >> data/propose.log 2>&1
+30 12 * * 1-5 cd ~/Development/trading-agent && .venv/bin/trader propose >> data/propose.log 2>&1
+0  15 * * 1-5 cd ~/Development/trading-agent && .venv/bin/trader propose >> data/propose.log 2>&1
 15 16 * * 1-5 cd ~/Development/trading-agent && .venv/bin/trader report daily --send >> data/report.log 2>&1
-0 18 * * 0    cd ~/Development/trading-agent && .venv/bin/trader report weekly --send >> data/report.log 2>&1
+0  18 * * 0   cd ~/Development/trading-agent && .venv/bin/trader report weekly --send >> data/report.log 2>&1
 ```
+(cron needs `ANTHROPIC_API_KEY` in `.env`, since there is no Cowork agent to be the brain.)
 
 Remember: scheduled tasks only fire when the machine is awake (and, for Cowork, when the app
-is open). If you want 8:30 sharp, set the Mac to wake at 8:25 on weekdays.
+is open). Keep the Mac awake 09:30–16:30 ET on weekdays.
 
 ## 10. Live money (read twice, do once, or never)
 
