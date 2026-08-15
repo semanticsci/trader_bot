@@ -47,15 +47,23 @@ def evaluate(
     account = snapshot.account
     results: list[GateResult] = []
     accepted_count = 0
-    cash_committed = Decimal("0")  # buys already accepted in this proposal
+    # Buys already sitting at the broker (unfilled) are committed capital — count them from the start.
+    cash_committed = snapshot.pending_buy_notional
     # Percentage rules are measured against the capital *budget*, not necessarily the whole account
     # (a $100k paper account simulating $1,000 — see RiskConfig.capital_cap).
     capital_cap = config.capital_cap if config.capital_cap is not None else snapshot.capital_cap
     base = min(account.equity, capital_cap) if capital_cap is not None else account.equity
-    invested = snapshot.invested  # market value already deployed, before this proposal
+    invested = snapshot.invested  # market value already deployed (positions), before this proposal
     # Position values after the buys/sells accepted so far (symbol -> market value)
     projected_value: dict[str, Decimal] = {p.symbol: p.market_value for p in account.positions}
     projected_qty: dict[str, Decimal] = {p.symbol: p.qty for p in account.positions}
+    for o in snapshot.open_orders:  # pending buys add exposure; pending sells reduce what's sellable
+        remaining = o.qty - o.filled_qty
+        if o.side is Side.BUY:
+            pending_value = remaining * (o.limit_price or Decimal("0"))
+            projected_value[o.symbol] = projected_value.get(o.symbol, Decimal("0")) + pending_value
+        else:
+            projected_qty[o.symbol] = projected_qty.get(o.symbol, Decimal("0")) - remaining
 
     daily_breaker_tripped = account.day_pl_pct <= -config.max_daily_loss_pct
 

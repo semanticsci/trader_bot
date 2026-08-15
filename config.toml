@@ -23,8 +23,9 @@ max_position_pct = 0.25
 max_order_notional = 400
 # Most orders the gate will pass in one proposal.
 max_orders_per_proposal = 3
-# Keep at least this fraction of equity in cash (buys that would breach it are rejected).
-min_cash_buffer_pct = 0.10
+# Keep at least this fraction of the budget in cash (buys that would breach it are rejected).
+# 5% = a little slack for fills/rounding; the owner wants the budget essentially fully deployed.
+min_cash_buffer_pct = 0.05
 # Circuit breaker: if equity is down more than this vs. yesterday's close, block new BUYS today.
 max_daily_loss_pct = 0.03
 # A limit price more than this far from the current price is treated as an LLM mistake.

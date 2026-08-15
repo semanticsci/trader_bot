@@ -41,6 +41,10 @@ class BrokerPort(Protocol):
         """All orders (any status) submitted after ``since``."""
         ...
 
+    def get_open_orders(self) -> list[BrokerOrder]:
+        """Orders accepted by the broker but not yet filled/cancelled (pending exposure)."""
+        ...
+
 
 class MarketDataPort(Protocol):
     """Prices and history."""

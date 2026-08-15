@@ -135,6 +135,28 @@ class MarketSnapshot:
     # The most capital the strategy may deploy (see RiskConfig.capital_cap). Shown to the brain so
     # it sizes positions against the *budget*, not the whole account. None = whole account.
     capital_cap: Money | None = None
+    # Orders already at the broker but not filled. They are *committed* capital: the gate counts
+    # pending buys toward the cap, and the brain should not re-propose them.
+    open_orders: tuple[BrokerOrder, ...] = ()
+
+    @property
+    def pending_buy_notional(self) -> Money:
+        """Dollar value of open BUY orders (qty x limit), i.e. cash already spoken for."""
+        return sum(
+            ((o.qty - o.filled_qty) * (o.limit_price or Decimal("0")) for o in self.open_orders if o.side is Side.BUY),
+            Decimal("0"),
+        )
+
+    def pending_buy_notional_for(self, symbol: str) -> Money:
+        return sum(
+            ((o.qty - o.filled_qty) * (o.limit_price or Decimal("0"))
+             for o in self.open_orders if o.side is Side.BUY and o.symbol == symbol),
+            Decimal("0"),
+        )
+
+    def pending_sell_qty_for(self, symbol: str) -> Decimal:
+        pending = (o for o in self.open_orders if o.side is Side.SELL and o.symbol == symbol)
+        return sum(((o.qty - o.filled_qty) for o in pending), Decimal("0"))
 
     @property
     def capital_base(self) -> Money:

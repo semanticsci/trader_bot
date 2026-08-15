@@ -90,6 +90,10 @@ class AlpacaBroker:
         req = GetOrdersRequest(status=QueryOrderStatus.ALL, after=since, limit=200)
         return [self._to_broker_order(o) for o in self._trading.get_orders(req)]
 
+    def get_open_orders(self) -> list[BrokerOrder]:
+        req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=200)
+        return [self._to_broker_order(o) for o in self._trading.get_orders(req)]
+
     # ------------------------------------------------------------------ MarketDataPort
 
     def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:

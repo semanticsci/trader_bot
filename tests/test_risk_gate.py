@@ -190,3 +190,40 @@ def test_no_cap_uses_full_equity(risk_config):
     snap = make_snapshot(_big_paper_account(), universe=("NVDA", "SPY", "AAPL"))
     res = risk.evaluate([order("NVDA", Side.BUY, "2", "180")], snap, cfg)  # $360 on $100k: fine
     assert res[0].accepted, res[0].reasons
+
+
+# ---------------------------------------------------------------- open (unfilled) orders count as committed capital
+
+
+def _pending(symbol, side, qty, price):
+    from trader.domain.models import BrokerOrder
+    return BrokerOrder(f"open-{symbol}", symbol, side, Decimal(qty), Decimal(price), "accepted")
+
+
+def test_pending_buys_count_toward_capital_cap(risk_config):
+    """$590 of unfilled buys at the broker + a new $450 buy would exceed the $1,000 cap."""
+    cfg = replace(risk_config, capital_cap=Decimal("1000"), max_order_notional=Decimal("500"), max_position_pct=Decimal("0.5"))
+    b = _big_paper_account({"NVDA": Decimal("225"), "MSFT": Decimal("495"), "SPY": Decimal("776"), "QQQ": Decimal("731")})
+    snap = replace(make_snapshot(b, universe=("NVDA", "MSFT", "SPY", "QQQ")),
+                   open_orders=(_pending("NVDA", Side.BUY, "0.89", "224.03"), _pending("MSFT", Side.BUY, "0.4", "492.87"),
+                                _pending("SPY", Side.BUY, "0.25", "772.15")))
+    res = risk.evaluate([order("QQQ", Side.BUY, "0.6", "731")], snap, cfg)  # $438.6 → total $1,028
+    assert not res[0].accepted and "capital cap" in _reasons(res)
+    res_ok = risk.evaluate([order("QQQ", Side.BUY, "0.5", "731")], snap, cfg)  # $365.5 → total $955
+    assert res_ok[0].accepted, res_ok[0].reasons
+
+
+def test_pending_buy_counts_toward_position_concentration(risk_config):
+    cfg = replace(risk_config, capital_cap=Decimal("1000"))
+    b = _big_paper_account({"NVDA": Decimal("225")})
+    snap = replace(make_snapshot(b, universe=("NVDA",)), open_orders=(_pending("NVDA", Side.BUY, "0.89", "224.03"),))
+    res = risk.evaluate([order("NVDA", Side.BUY, "0.5", "225")], snap, cfg)  # 199 + 112 = 31% of cap
+    assert not res[0].accepted and "of capital, cap is 25%" in _reasons(res)
+
+
+def test_pending_sell_reduces_sellable_qty(risk_config):
+    b = FakeBroker(equity=Decimal("1000"), cash=Decimal("600"), positions=(position("AAPL", "2", "200"),),
+                   prices={"AAPL": Decimal("200")})
+    snap = replace(make_snapshot(b, universe=("AAPL",)), open_orders=(_pending("AAPL", Side.SELL, "1.5", "201"),))
+    res = risk.evaluate([order("AAPL", Side.SELL, "1", "200")], snap, risk_config)  # only 0.5 left to sell
+    assert not res[0].accepted and "would open a short" in _reasons(res)

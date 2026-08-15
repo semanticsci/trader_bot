@@ -21,8 +21,10 @@ def take_snapshot(
 ) -> MarketSnapshot:
     """Collect account + quotes + indicators for the universe and any held symbols."""
     account = broker.get_account()
+    open_orders = tuple(broker.get_open_orders())
     held = tuple(p.symbol for p in account.positions)
-    symbols = sorted(set(universe) | set(held))
+    pending = tuple(o.symbol for o in open_orders)
+    symbols = sorted(set(universe) | set(held) | set(pending))
 
     quotes = data.get_quotes(symbols)
     bars = data.get_daily_bars(symbols, history_days)
@@ -40,12 +42,14 @@ def take_snapshot(
         indicators=indicators,
         universe=universe,
         capital_cap=capital_cap,
+        open_orders=open_orders,
     )
     log.info(
-        "snapshot: equity=%s cash=%s positions=%d quotes=%d market_open=%s",
+        "snapshot: equity=%s cash=%s positions=%d open_orders=%d quotes=%d market_open=%s",
         account.equity,
         account.cash,
         len(account.positions),
+        len(open_orders),
         len(quotes),
         snap.market_open,
     )

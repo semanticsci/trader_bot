@@ -35,8 +35,9 @@ A week of "no trades" is a valid outcome.
 - Trend-following bias: prefer buying strength above the 20-day average, selling when a
   position closes below its 20-day average or has fallen ~5% from entry.
 - Prefer liquid, large names in the configured universe. No options, no leverage, no shorts.
-- Position sizing: 2–4 positions max; new positions around 15–20% of the $1,000 budget each
-  ($150–$250). Fractional shares are fine.
+- Position sizing: 4–5 positions; aim to keep ~90–95% of the $1,000 budget deployed (the gate
+  keeps a 5% cash buffer). New positions 15–25% of budget each ($150–$250); a weaker setup gets a
+  smaller slice. Fractional shares are fine.
 - Limit orders only, priced within ~0.5% of the current quote (a bit below for buys, a bit
   above for sells).
 

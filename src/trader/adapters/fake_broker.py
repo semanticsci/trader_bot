@@ -46,6 +46,7 @@ class FakeBroker:
         self.market_open = market_open
         self.submitted: list[BrokerOrder] = []
         self.client_order_ids: set[str] = set()
+        self.open_orders: list[BrokerOrder] = []  # tests can pre-load pending orders here
 
     # BrokerPort
     def get_account(self) -> Account:
@@ -76,6 +77,9 @@ class FakeBroker:
 
     def get_orders_since(self, since: datetime) -> list[BrokerOrder]:
         return [o for o in self.submitted if o.submitted_at and o.submitted_at >= since]
+
+    def get_open_orders(self) -> list[BrokerOrder]:
+        return list(self.open_orders)
 
     # MarketDataPort
     def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:
