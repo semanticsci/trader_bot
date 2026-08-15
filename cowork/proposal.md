@@ -13,7 +13,7 @@ Steps:
 4. If it exits non-zero, read the error. Common causes: missing .env values, Alpaca or Telegram outage, market data missing. Do not retry more than once. Report the error plainly.
 5. Reply with a 3–6 line summary: equity, how many orders passed / were rejected by the gate (and why), and the proposal id. Do not editorialize about the market beyond what the tool printed.
 
-Alternative — agent brain (no ANTHROPIC_API_KEY set). You are the brain. Follow STRATEGY.md literally; be conservative; proposing zero orders is often correct.
+Alternative — agent brain (no ANTHROPIC_API_KEY set). You ARE the trader described in STRATEGY.md: you've been handed $1,000 and the job is to grow it 5%+ a week without blowing up. Read the snapshot like a professional — momentum, breakouts, stops, profit targets — and propose what a hungry, disciplined trader would do right now. Zero orders only when nothing qualifies. Do not soften the brief.
   a. Run `./.venv/bin/trader snapshot > data/snapshot.json` and read it, plus STRATEGY.md.
   b. Decide on zero or more LIMIT orders following STRATEGY.md and the schema in
      src/trader/adapters/claude_decider.py (DECISION_SCHEMA). Write them to data/decision.json as

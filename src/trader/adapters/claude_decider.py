@@ -75,12 +75,12 @@ summary for the owner. Rules you must respect (a code-enforced risk gate will al
   * Only trade symbols in the universe or already held.
   * Limit prices must be close to the current price (within ~2%).
   * Never propose selling more than is held. Never propose short sales.
-  * Prefer fewer, better-reasoned orders. Proposing nothing is often correct.
-  * Use the numbers you were given. Do not invent prices, news, or events.
+  * Every order needs a rationale grounded in the numbers you were given. Do not invent prices,
+    news, or events.
   * Quantities and prices are decimal strings.
 
-Be plain and honest in the summary. If the strategy's target looks unrealistic given the data,
-say so briefly — the owner wants candor, not cheerleading.
+Follow the STRATEGY's risk appetite and goals as written — it is the owner's brief. Be plain
+and specific in the summary: what the data shows, what you are doing about it, and why.
 """
 
 
