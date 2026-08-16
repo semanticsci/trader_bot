@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write(data/**)",
+      "Bash(cd:*)",
+      "Bash(./.venv/bin/trader:*)",
+      "Bash(.venv/bin/trader:*)",
+      "Bash(./.venv/bin/python:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(grep:*)",
+      "Bash(tail:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(launchctl print:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)"
+    ],
+    "deny": [
+      "Bash(./.venv/bin/trader approve:*)",
+      "Bash(.venv/bin/trader approve:*)",
+      "Read(.env)",
+      "Edit(.env)",
+      "Write(.env)"
+    ]
+  }
+}
