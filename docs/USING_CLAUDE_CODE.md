@@ -8,7 +8,7 @@ open a folder in it.
 ## First five minutes
 
 ```bash
-git clone https://github.com/techdozor/trader_bot.git ~/Development/trading-agent
+git clone https://github.com/semanticsci/trader_bot.git ~/Development/trading-agent
 cd ~/Development/trading-agent
 claude          # or open the folder in the Claude desktop app
 ```

@@ -41,7 +41,7 @@ what filled — goes into a journal you can study later.
 ## Quick start (paper account, ~20 minutes)
 
 ```bash
-git clone https://github.com/techdozor/trader_bot.git && cd trading-agent
+git clone https://github.com/semanticsci/trader_bot.git && cd trading-agent
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 python -m pytest            # everything should pass, offline

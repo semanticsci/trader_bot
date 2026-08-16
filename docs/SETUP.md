@@ -7,7 +7,7 @@ account. Do the live-money step last, or never.
 ## 1. The code
 
 ```bash
-git clone https://github.com/techdozor/trader_bot.git ~/Development/trading-agent
+git clone https://github.com/semanticsci/trader_bot.git ~/Development/trading-agent
 cd ~/Development/trading-agent
 python3 -m venv .venv
 source .venv/bin/activate
