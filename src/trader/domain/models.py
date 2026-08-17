@@ -86,6 +86,14 @@ class Indicators:
     return_5d_pct: Decimal | None
     return_20d_pct: Decimal | None
     avg_volume_20d: int | None
+    # --- added for the wide view ---
+    rsi_14: Decimal | None = None  # 0-100; >70 stretched, <30 washed out
+    atr_pct_14: Decimal | None = None  # average true range as % of price — how much it moves per day
+    rs_20d_vs_spy: Decimal | None = None  # 20-day return minus SPY's; >0 = leading the market
+    gap_pct: Decimal | None = None  # today's open vs yesterday's close
+    range_pos: Decimal | None = None  # where the last price sits in today's range: 0 = low, 1 = high
+    volume_ratio: Decimal | None = None  # today's volume / 20-day average (>1.5 = something's happening)
+    dist_to_high_20d_pct: Decimal | None = None  # (price - 20d high) / 20d high; 0 = at the high
 
 
 @dataclass(frozen=True)
@@ -138,6 +146,10 @@ class MarketSnapshot:
     # Orders already at the broker but not filled. They are *committed* capital: the gate counts
     # pending buys toward the cap, and the brain should not re-propose them.
     open_orders: tuple[BrokerOrder, ...] = ()
+    # --- the wide view ---
+    regime: dict[str, Any] = field(default_factory=dict)  # SPY trend, breadth, risk-on/off verdict
+    ranking: tuple[dict[str, Any], ...] = ()  # symbols scored by momentum, strongest first (the shortlist)
+    news: dict[str, tuple[str, ...]] = field(default_factory=dict)  # symbol -> recent headlines
 
     @property
     def pending_buy_notional(self) -> Money:

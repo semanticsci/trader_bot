@@ -1,12 +1,25 @@
 # Non-secret configuration. Safe to commit. Secrets live in `.env`.
 
 [universe]
-# The only symbols the brain is allowed to consider (plus anything you already hold).
-# Keeping the universe small keeps data fetches cheap and reasoning focused.
-symbols = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD"]
-# Benchmark used in reports.
+# The names the brain may trade (plus anything already held). Wide on purpose: on any given week
+# the movers are somewhere in here. Liquid, large, fractionable. Sector/asset ETFs give the book
+# somewhere to go when the regime says risk-off (bonds, gold, defensives).
+symbols = [
+  # broad + factor
+  "SPY", "QQQ", "IWM", "DIA",
+  # sectors
+  "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLC", "XLRE", "SMH", "XBI",
+  # defensives / risk-off
+  "GLD", "TLT", "IEF",
+  # mega/large caps
+  "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "AMD", "NFLX", "CRM", "ORCL",
+  "ADBE", "INTC", "QCOM", "MU", "TSM", "COST", "WMT", "HD", "JPM", "BAC", "GS", "V", "MA",
+  "UNH", "LLY", "JNJ", "MRK", "XOM", "CVX", "BA", "CAT", "GE", "DIS", "NKE", "MCD",
+  "PLTR", "COIN", "UBER", "SHOP", "ABNB", "PYPL", "SQ",
+]
+# Benchmark used for relative strength, regime and reports.
 benchmark = "SPY"
-# How many daily bars of history to feed the brain (for indicators).
+# How many daily bars of history to feed the indicators.
 history_days = 60
 
 [risk]
@@ -22,7 +35,7 @@ max_position_pct = 0.25
 # Largest single order, in dollars.
 max_order_notional = 400
 # Most orders the gate will pass in one proposal.
-max_orders_per_proposal = 3
+max_orders_per_proposal = 5
 # Keep at least this fraction of the budget in cash (buys that would breach it are rejected).
 # 0 = the owner wants the whole budget deployable; the capital_cap is the real ceiling.
 min_cash_buffer_pct = 0.0

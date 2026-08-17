@@ -255,3 +255,54 @@ def test_build_performance_handles_no_history():
     p = build_performance([], inception=inception, inception_equity=Decimal("1000"), capital_cap=Decimal("1000"),
                           spy_bars=[], fills=[], now=inception)
     assert p.since_inception == 0 and "no equity history" in " ".join(p.warnings)
+
+
+# ---------------------------------------------------------------- wide-view indicators
+
+
+def _ohlc(closes, spread=Decimal("2")):
+    from trader.domain.models import Bar
+    return [Bar(f"2026-0{1 + i // 28}-{(i % 28) + 1:02d}", Decimal(c) - 1, Decimal(c) + spread, Decimal(c) - spread, Decimal(c), 1000 + i)
+            for i, c in enumerate(closes)]
+
+
+def test_rsi_extremes_and_midpoint():
+    from trader.domain.indicators import rsi
+    up = [Decimal(100 + i) for i in range(20)]
+    down = [Decimal(120 - i) for i in range(20)]
+    assert rsi(up) == Decimal("100")
+    assert rsi(down) == Decimal("0.0")
+    assert rsi([Decimal(100)] * 10) is None  # not enough data
+
+
+def test_atr_pct_reflects_range():
+    from trader.domain.indicators import atr_pct
+    bars = _ohlc([100] * 20, spread=Decimal("2"))  # high-low = 4 every day on a $100 stock
+    assert atr_pct(bars) == Decimal("0.0400")
+    assert atr_pct(bars[:5]) is None
+
+
+def test_compute_indicators_wide_fields():
+    from trader.domain.indicators import compute_indicators
+    from trader.domain.models import Quote
+    bars = _ohlc(list(range(100, 160)))  # steady uptrend, last close 159
+    q = Quote("X", Decimal("160"), Decimal("159"), Decimal("0.0063"))
+    ind = compute_indicators(bars, quote=q, spy_return_20d=Decimal("0.05"))
+    assert ind.rsi_14 == Decimal("100")  # straight up
+    assert ind.atr_pct_14 is not None and ind.rs_20d_vs_spy is not None
+    assert ind.rs_20d_vs_spy == ind.return_20d_pct - Decimal("0.05")
+    assert ind.gap_pct is not None and ind.range_pos is not None and ind.volume_ratio is not None
+    assert ind.dist_to_high_20d_pct is not None
+
+
+def test_rank_and_regime():
+    from trader.domain.indicators import compute_indicators, market_regime, rank_universe
+    strong = compute_indicators(_ohlc(list(range(100, 160))), spy_return_20d=Decimal("0.02"))
+    weak = compute_indicators(_ohlc(list(range(160, 100, -1))), spy_return_20d=Decimal("0.02"))
+    spy = compute_indicators(_ohlc([100 + i // 3 for i in range(60)]))
+    inds = {"STRONG": strong, "WEAK": weak, "SPY": spy}
+    ranking = rank_universe(inds, top=1, bottom=1)
+    assert ranking[0]["symbol"] == "STRONG" and ranking[0]["tag"] == "leader"
+    assert ranking[-1]["symbol"] == "WEAK" and ranking[-1]["tag"] == "laggard"
+    regime = market_regime(inds, "SPY")
+    assert regime["verdict"] in {"risk_on", "neutral", "risk_off"} and regime["breadth_above_sma20"] is not None

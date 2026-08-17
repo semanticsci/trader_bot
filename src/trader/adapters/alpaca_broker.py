@@ -15,7 +15,8 @@ from decimal import Decimal
 
 from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest, StockSnapshotRequest
+from alpaca.data.historical.news import NewsClient
+from alpaca.data.requests import NewsRequest, StockBarsRequest, StockSnapshotRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus, TimeInForce
@@ -43,6 +44,7 @@ class AlpacaBroker:
         # The free data plan gets IEX (one exchange's view of prices). Good enough for daily
         # decisions; not for high-frequency anything.
         self._data = StockHistoricalDataClient(api_key, secret_key)
+        self._news = NewsClient(api_key, secret_key)
         self._feed = DataFeed.IEX
 
     # ------------------------------------------------------------------ BrokerPort
@@ -166,6 +168,28 @@ class AlpacaBroker:
             ]
             out[sym] = bars[-days:]
         return out
+
+    def get_news(self, symbols: list[str], limit: int = 30) -> dict[str, list[str]]:
+        """Recent headlines from Alpaca's news feed, grouped by symbol. Best-effort: never raises."""
+        if not symbols:
+            return {}
+        out: dict[str, list[str]] = {}
+        try:
+            # Alpaca caps symbols per request; chunk to be safe.
+            for i in range(0, len(symbols), 25):
+                chunk = symbols[i : i + 25]
+                res = self._news.get_news(NewsRequest(symbols=",".join(chunk), limit=min(limit, 50)))
+                items = res.data.get("news", []) if hasattr(res, "data") else list(res)
+                for n in items:
+                    stamp = getattr(n, "created_at", None)
+                    when = stamp.strftime("%m-%d %H:%M") if stamp else ""
+                    line = f"[{when}] {str(getattr(n, 'headline', '')).strip()}"
+                    for s in getattr(n, "symbols", []) or []:
+                        if s in chunk:
+                            out.setdefault(s, []).append(line)
+        except Exception as exc:  # noqa: BLE001 — news is nice-to-have; a snapshot must never fail on it
+            log.warning("news fetch failed: %s", type(exc).__name__)
+        return {s: v[:8] for s, v in out.items()}
 
     # ------------------------------------------------------------------ helpers
 

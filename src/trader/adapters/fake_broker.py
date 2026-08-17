@@ -101,6 +101,9 @@ class FakeBroker:
             if s in symbols
         }
 
+    def get_news(self, symbols: list[str], limit: int = 30) -> dict[str, list[str]]:
+        return {}
+
     def get_daily_bars(self, symbols: list[str], days: int) -> dict[str, list[Bar]]:
         out: dict[str, list[Bar]] = {}
         for s in symbols:

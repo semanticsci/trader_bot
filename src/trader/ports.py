@@ -64,6 +64,10 @@ class MarketDataPort(Protocol):
         """Chronological daily bars per symbol (oldest first)."""
         ...
 
+    def get_news(self, symbols: list[str], limit: int = 30) -> dict[str, list[str]]:
+        """Recent headlines per symbol (newest first). Empty dict if unsupported/unavailable."""
+        ...
+
 
 class DeciderPort(Protocol):
     """The brain. Given what the market looks like, what should we do?"""

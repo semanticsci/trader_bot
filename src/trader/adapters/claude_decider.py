@@ -81,8 +81,12 @@ SYSTEM_PROMPT = """You are the decision step of a small, human-approved trading 
 
 You will be given:
   1. A STRATEGY written by the account owner. Follow it. It is their money and their thesis.
-  2. A SNAPSHOT of their account and the market as JSON: equity, cash, positions, current quotes,
-     and simple indicators (20/50-day SMA, 20-day high/low, 5/20-day returns) for a small universe.
+  2. A SNAPSHOT of their account and the market as JSON: equity, cash, positions, open orders,
+     current quotes, and per-name indicators (20/50-day SMA, 20-day high/low, 5/20-day returns, RSI,
+     ATR, relative strength vs SPY, gap, range position, volume ratio) for a wide universe (~60 names),
+     plus `regime` (risk_on/neutral/risk_off with breadth), `ranking` (momentum leaders/laggards
+     shortlist) and `news` (recent headlines for held names and leaders). Read regime, then ranking,
+     then the names you care about — not all 60 rows.
 
 Your job: propose zero or more LIMIT orders for today, with a short rationale each, plus a short
 summary for the owner. Rules you must respect (a code-enforced risk gate will also check them):
