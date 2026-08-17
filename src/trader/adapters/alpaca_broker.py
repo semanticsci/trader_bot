@@ -19,7 +19,7 @@ from alpaca.data.requests import StockBarsRequest, StockSnapshotRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus, TimeInForce
-from alpaca.trading.requests import GetOrdersRequest, LimitOrderRequest
+from alpaca.trading.requests import GetOrdersRequest, GetPortfolioHistoryRequest, LimitOrderRequest
 
 from trader.domain.indicators import pct_change
 from trader.domain.models import Account, Bar, BrokerOrder, Position, ProposedOrder, Quote, Side
@@ -97,6 +97,20 @@ class AlpacaBroker:
     def cancel_order(self, broker_order_id: str) -> None:
         log.info("cancelling order %s (paper=%s)", broker_order_id, self.paper)
         self._trading.cancel_order_by_id(broker_order_id)
+
+    def get_equity_history(self, days: int) -> list[tuple[datetime, Decimal]]:
+        # Alpaca periods are 1D/1W/1M/3M/1A style; pick the smallest that covers `days`.
+        period = "1W" if days <= 7 else "1M" if days <= 31 else "3M" if days <= 93 else "1A"
+        # Intraday granularity for a week (so today's moves show), daily beyond that.
+        timeframe = "15Min" if days <= 7 else "1D"
+        req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe, extended_hours=False)
+        h = self._trading.get_portfolio_history(req)
+        out: list[tuple[datetime, Decimal]] = []
+        for ts, eq in zip(h.timestamp, h.equity, strict=False):
+            if eq is None or float(eq) <= 0:
+                continue  # points before the account existed come back as 0
+            out.append((datetime.fromtimestamp(int(ts), tz=UTC), _dec(eq)))
+        return out
 
     # ------------------------------------------------------------------ MarketDataPort
 

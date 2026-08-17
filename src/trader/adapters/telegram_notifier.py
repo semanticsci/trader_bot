@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -76,6 +77,17 @@ class TelegramNotifier:
 
     def send_text(self, text: str) -> None:
         self._call("sendMessage", {"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"})
+
+    def send_photo(self, path: str, caption: str = "") -> None:
+        """Send an image file (e.g. the performance chart) with a plain-text caption."""
+        url = API.format(token=self.token, method="sendPhoto")
+        with open(path, "rb") as fh:
+            resp = self._http.post(url, data={"chat_id": self.chat_id, "caption": caption[:1024]},
+                                   files={"photo": (Path(path).name, fh, "image/png")})
+        data = resp.json()
+        if not data.get("ok"):
+            log.error("telegram sendPhoto failed: %s", data.get("description"))
+            raise httpx.HTTPError(f"telegram sendPhoto: {data.get('description')}")
 
     def update_proposal_message(self, proposal: Proposal, footer: str) -> None:
         if proposal.telegram_message_id is None:

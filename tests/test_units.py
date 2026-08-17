@@ -211,3 +211,47 @@ def test_telegram_call_does_not_retry_api_errors(monkeypatch):
     with pytest.raises(httpx.HTTPError):
         tn._call("sendMessage", {})
     assert calls["n"] == 1
+
+
+# ---------------------------------------------------------------- performance chart numbers
+
+
+def test_build_performance_numbers_and_series():
+    from datetime import UTC, datetime, timedelta
+
+    from trader.app.chart import build_performance, caption
+    from trader.domain.models import Bar, BrokerOrder, Side
+
+    inception = datetime(2026, 8, 15, 20, 0, tzinfo=UTC)
+    now = inception + timedelta(days=2, hours=4)
+    hist = [
+        (inception - timedelta(days=1), Decimal("100000")),  # before inception: ignored in the series
+        (inception + timedelta(days=2), Decimal("100010")),
+        (now, Decimal("100025")),
+    ]
+    bars = [Bar("2026-08-14", Decimal(1), Decimal(1), Decimal(1), Decimal("770"), 1),
+            Bar("2026-08-17", Decimal(1), Decimal(1), Decimal(1), Decimal("777.7"), 1)]  # +1%
+    fills = [BrokerOrder("o1", "AMD", Side.BUY, Decimal("0.47"), Decimal("511.82"), "filled",
+                         filled_qty=Decimal("0.47"), filled_avg_price=Decimal("511.66"),
+                         filled_at=inception + timedelta(days=1, hours=17))]
+    p = build_performance(hist, inception=inception, inception_equity=Decimal("100000"), capital_cap=Decimal("1000"),
+                          spy_bars=bars, fills=fills, now=now, window_days=7)
+    assert p.since_inception == Decimal("25") and p.pct(p.since_inception) == Decimal("2.5")
+    assert p.week == Decimal("25") and p.month == Decimal("25")  # book younger than a week/month → from inception
+    assert p.pnl_series[0] == (inception, Decimal("0")) and p.pnl_series[-1][1] == Decimal("25")
+    assert p.spy_since_inception == Decimal("10")  # 1% of $1,000, based on the last close on/before inception
+    assert p.spy_series[0] == (inception, Decimal("0"))
+    assert len(p.fills) == 1 and p.fills[0][1] == "AMD"
+    text = caption(p, "paper")
+    assert "+$25.00" in text and "+2.50%" in text and "SPY" in text
+
+
+def test_build_performance_handles_no_history():
+    from datetime import UTC, datetime
+
+    from trader.app.chart import build_performance
+
+    inception = datetime(2026, 8, 15, tzinfo=UTC)
+    p = build_performance([], inception=inception, inception_equity=Decimal("1000"), capital_cap=Decimal("1000"),
+                          spy_bars=[], fills=[], now=inception)
+    assert p.since_inception == 0 and "no equity history" in " ".join(p.warnings)

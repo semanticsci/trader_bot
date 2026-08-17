@@ -48,6 +48,7 @@ class FakeBroker:
         self.client_order_ids: set[str] = set()
         self.open_orders: list[BrokerOrder] = []  # tests can pre-load pending orders here
         self.cancelled: list[str] = []
+        self.equity_history: list[tuple[datetime, Decimal]] = []
 
     # BrokerPort
     def get_account(self) -> Account:
@@ -81,6 +82,9 @@ class FakeBroker:
 
     def get_open_orders(self) -> list[BrokerOrder]:
         return list(self.open_orders)
+
+    def get_equity_history(self, days: int) -> list[tuple[datetime, Decimal]]:
+        return list(self.equity_history)
 
     def cancel_order(self, broker_order_id: str) -> None:
         before = len(self.open_orders)

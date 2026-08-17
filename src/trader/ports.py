@@ -12,6 +12,7 @@ SQLite) implement them. This is what makes it possible to:
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 
 from trader.domain.models import (
@@ -47,6 +48,10 @@ class BrokerPort(Protocol):
 
     def cancel_order(self, broker_order_id: str) -> None:
         """Cancel an open order. Raises if the broker refuses (e.g. already filled)."""
+        ...
+
+    def get_equity_history(self, days: int) -> list[tuple[datetime, Decimal]]:
+        """(timestamp, account equity) points, oldest first, one per trading day (or finer)."""
         ...
 
 

@@ -80,6 +80,12 @@ def _build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("status", help="account and latest proposal")
     st.set_defaults(func=cmd_status)
 
+    sc = sub.add_parser("chart", help="7-day P&L chart + since-inception/week/month/today numbers")
+    sc.add_argument("--days", type=int, default=7, help="chart window in days (default 7)")
+    sc.add_argument("--send", action="store_true", help="send the PNG + numbers to Telegram")
+    sc.add_argument("--out", type=Path, default=None, help="where to write the PNG (default data/performance.png)")
+    sc.set_defaults(func=cmd_chart)
+
     sr = sub.add_parser("report", help="daily or weekly report")
     sr.add_argument("period", choices=["daily", "weekly"])
     sr.add_argument("--send", action="store_true", help="also send to Telegram")
@@ -209,6 +215,64 @@ def cmd_report(args: argparse.Namespace) -> int:
     print(text)
     if args.send:
         _notifier(s).send_text(text)
+    return 0
+
+
+def cmd_chart(args: argparse.Namespace) -> int:
+    from datetime import datetime
+    from decimal import Decimal
+
+    from trader.app.chart import build_performance, caption, render_chart
+    from trader.domain.models import utcnow
+
+    s = load_settings()
+    broker = _broker(s)
+    journal = _journal(s)
+    # Inception = the moment the book started. Recorded once, in the journal, from the first
+    # proposal we ever made; falls back to "now" for a brand-new install.
+    inception_raw = journal.get_state("inception_at")
+    inception_eq_raw = journal.get_state("inception_equity")
+    if not (inception_raw and inception_eq_raw):
+        first = journal.list_proposals(datetime(2000, 1, 1, tzinfo=utcnow().tzinfo))
+        if first:
+            inception = first[0].created_at
+            inception_eq = Decimal(str(first[0].snapshot.get("account", {}).get("equity", "0")))
+        else:
+            inception = utcnow()
+            inception_eq = broker.get_account().equity
+        journal.set_state("inception_at", inception.isoformat())
+        journal.set_state("inception_equity", str(inception_eq))
+    else:
+        inception = datetime.fromisoformat(inception_raw)
+        inception_eq = Decimal(inception_eq_raw)
+
+    # Intraday points for the chart window + daily points for the month-over-month base.
+    seen: dict[datetime, Decimal] = {}
+    for ts, eq in broker.get_equity_history(31) + broker.get_equity_history(min(args.days, 7)):
+        seen[ts] = eq
+    # Every check-in journals the equity it saw — free intraday points that fill the line in.
+    for p in journal.list_proposals(utcnow() - __import__("datetime").timedelta(days=args.days + 1)):
+        eq_raw = p.snapshot.get("account", {}).get("equity")
+        if eq_raw:
+            seen[p.created_at] = Decimal(str(eq_raw))
+    seen[utcnow()] = broker.get_account().equity  # the broker's history lags; the live number is truth
+    history = sorted(seen.items())
+    spy_now = (broker.get_quotes([s.benchmark]).get(s.benchmark) or None)
+    spy_now_price = spy_now.price if spy_now else None
+    spy_bars = broker.get_daily_bars([s.benchmark], max(args.days, 31) + 5).get(s.benchmark, [])
+    fills = broker.get_orders_since(utcnow() - __import__("datetime").timedelta(days=args.days + 1))
+    perf = build_performance(
+        history, inception=inception, inception_equity=inception_eq, capital_cap=s.risk.capital_cap or inception_eq,
+        spy_bars=spy_bars, fills=fills, window_days=args.days, spy_now=spy_now_price,
+    )
+    out = args.out or (s.project_root / "data" / "performance.png")
+    render_chart(perf, out, title=f"Book P&L — last {args.days} days [{s.mode.upper()}]")
+    text = caption(perf, s.mode)
+    print(text)
+    print(f"chart: {out}")
+    if args.send:
+        _notifier(s).send_photo(str(out), caption=text)
+        print("sent to telegram")
     return 0
 
 
