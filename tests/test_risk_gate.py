@@ -227,3 +227,22 @@ def test_pending_sell_reduces_sellable_qty(risk_config):
     snap = replace(make_snapshot(b, universe=("AAPL",)), open_orders=(_pending("AAPL", Side.SELL, "1.5", "201"),))
     res = risk.evaluate([order("AAPL", Side.SELL, "1", "200")], snap, risk_config)  # only 0.5 left to sell
     assert not res[0].accepted and "would open a short" in _reasons(res)
+
+
+# ---------------------------------------------------------------- rotation: sells in the same proposal free capital
+
+
+def test_sell_then_buy_rotation_passes_when_book_is_full(risk_config):
+    """Fully deployed ($1,000 cap). Sell $200 of A, buy $200 of B in the same proposal → both pass.
+    Buy first, sell later → the buy is rejected (order matters; the brain lists sells first)."""
+    cfg = replace(risk_config, capital_cap=Decimal("1000"), min_cash_buffer_pct=Decimal("0"), max_orders_per_proposal=5)
+    b = FakeBroker(
+        equity=Decimal("100000"), cash=Decimal("99000"), last_equity=Decimal("100000"),
+        positions=(position("AAA", "2", "200"), position("BBB", "3", "200")),  # $400 + $600 = $1,000 deployed
+        prices={"AAA": Decimal("200"), "BBB": Decimal("200"), "CCC": Decimal("100")},
+    )
+    snap = make_snapshot(b, universe=("AAA", "BBB", "CCC"))
+    good = risk.evaluate([order("AAA", Side.SELL, "1", "200"), order("CCC", Side.BUY, "2", "100")], snap, cfg)
+    assert [r.accepted for r in good] == [True, True], [r.reasons for r in good]
+    bad = risk.evaluate([order("CCC", Side.BUY, "2", "100"), order("AAA", Side.SELL, "1", "200")], snap, cfg)
+    assert not bad[0].accepted and "capital cap" in _reasons(bad, 0)

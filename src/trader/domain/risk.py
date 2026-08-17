@@ -92,7 +92,10 @@ def evaluate(
     # (a $100k paper account simulating $1,000 — see RiskConfig.capital_cap).
     capital_cap = config.capital_cap if config.capital_cap is not None else snapshot.capital_cap
     base = min(account.equity, capital_cap) if capital_cap is not None else account.equity
-    invested = snapshot.invested  # market value already deployed (positions), before this proposal
+    # Market value already deployed (positions). Sells accepted in this proposal free capital, so this
+    # runs down as we go — that's what lets "sell X, buy Y" pass when the book is full.
+    invested = snapshot.invested
+    cash_from_sells = Decimal("0")
     # Position values after the buys/sells accepted so far (symbol -> market value)
     projected_value: dict[str, Decimal] = {p.symbol: p.market_value for p in account.positions}
     projected_qty: dict[str, Decimal] = {p.symbol: p.qty for p in account.positions}
@@ -128,7 +131,8 @@ def evaluate(
                     f"yesterday, limit is -{config.max_daily_loss_pct:.0%} — no new buys today"
                 )
             reasons += _check_buy_size(
-                order, account, base, config, cash_committed, projected_value.get(order.symbol, Decimal("0"))
+                order, account, base, config, cash_committed - cash_from_sells,
+                projected_value.get(order.symbol, Decimal("0")),
             )
             reasons += _check_capital_cap(order, invested, cash_committed, capital_cap)
         else:
@@ -150,6 +154,8 @@ def evaluate(
                 projected_value[order.symbol] = max(
                     Decimal("0"), projected_value.get(order.symbol, Decimal("0")) - order.notional
                 )
+                invested = max(Decimal("0"), invested - order.notional)  # capital freed for later buys
+                cash_from_sells += order.notional
 
     return results
 
