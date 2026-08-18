@@ -32,7 +32,16 @@
       "Bash(TZ=*)",
       "Bash(true)",
       "Bash(test:*)",
-      "Bash([:*)"
+      "Bash([:*)",
+      "Bash(awk:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(cut:*)",
+      "Bash(tr:*)",
+      "Bash(jq:*)",
+      "Bash(printf:*)",
+      "Bash(pwd)",
+      "Bash(sed -n:*)"
     ],
     "deny": [
       "Bash(./.venv/bin/trader approve:*)",

@@ -6,7 +6,7 @@ Steps:
 1. `cd ~/Development/trading-agent`
 2. If the file `HALT` exists in the folder, run `./.venv/bin/trader status`, report that trading is halted, and stop.
    If today is a US market holiday or the weekend, run `./.venv/bin/trader status` and stop if it says `market open: False` — no proposal on closed days.
-3. Decide which brain to use: run `grep -cE '^ANTHROPIC_API_KEY=.+' .env`. If it prints `1`, use the API brain (next line). If `0`, use the "Alternative" (agent brain) below.
+3. Decide which brain to use: run `./.venv/bin/trader brain`. If it prints `api`, use the API brain. If it prints `agent`, use the agent brain (Alternative below). Never read or grep `.env` yourself — it holds secrets and is denied.
    API brain: `./.venv/bin/trader propose`
    - This collects the account + market snapshot, asks Claude for a decision using STRATEGY.md, runs the risk gate, journals everything, and sends the proposal to Telegram.
    - Read its stdout. It prints the proposal as plain text.

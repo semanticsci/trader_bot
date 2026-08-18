@@ -94,6 +94,9 @@ def _build_parser() -> argparse.ArgumentParser:
     stt = sub.add_parser("telegram-test", help="check bot token, discover chat id, send a hello")
     stt.set_defaults(func=cmd_telegram_test)
 
+    sb = sub.add_parser("brain", help="print which brain is configured: 'api' (ANTHROPIC_API_KEY set) or 'agent'")
+    sb.set_defaults(func=cmd_brain)
+
     sh = sub.add_parser("halt", help="create the HALT file — approver will refuse to submit")
     sh.set_defaults(func=cmd_halt)
     sres = sub.add_parser("resume", help="remove the HALT file")
@@ -255,7 +258,8 @@ def cmd_chart(args: argparse.Namespace) -> int:
         eq_raw = p.snapshot.get("account", {}).get("equity")
         if eq_raw:
             seen[p.created_at] = Decimal(str(eq_raw))
-    seen[utcnow()] = broker.get_account().equity  # the broker's history lags; the live number is truth
+    acct_now = broker.get_account()
+    seen[utcnow()] = acct_now.equity  # the broker's history lags; the live number is truth
     history = sorted(seen.items())
     spy_now = (broker.get_quotes([s.benchmark]).get(s.benchmark) or None)
     spy_now_price = spy_now.price if spy_now else None
@@ -264,6 +268,7 @@ def cmd_chart(args: argparse.Namespace) -> int:
     perf = build_performance(
         history, inception=inception, inception_equity=inception_eq, capital_cap=s.risk.capital_cap or inception_eq,
         spy_bars=spy_bars, fills=fills, window_days=args.days, spy_now=spy_now_price,
+        prev_close_equity=acct_now.last_equity,
     )
     out = args.out or (s.project_root / "data" / "performance.png")
     render_chart(perf, out, title=f"Book P&L — last {args.days} days [{s.mode.upper()}]")
@@ -294,6 +299,15 @@ def cmd_telegram_test(args: argparse.Namespace) -> int:
         return 0
     tn.send_text("👋 trading-agent can reach you. Approvals will arrive here.")
     print(f"sent a hello to chat {s.telegram_chat_id}")
+    return 0
+
+
+def cmd_brain(args: argparse.Namespace) -> int:
+    """Lets scheduled tasks pick the decision path without ever reading .env themselves."""
+    import os
+
+    load_settings(require_broker=False)  # loads .env into the process environment
+    print("api" if os.environ.get("ANTHROPIC_API_KEY", "").strip() else "agent")
     return 0
 
 

@@ -56,6 +56,7 @@ def build_performance(
     now: datetime | None = None,
     window_days: int = 7,
     spy_now: Decimal | None = None,
+    prev_close_equity: Decimal | None = None,
 ) -> Performance:
     """Turn raw equity history + SPY bars into P&L series and headline numbers.
 
@@ -95,7 +96,10 @@ def build_performance(
     since = now_equity - inception_equity
     week_base = equity_at(now - timedelta(days=7)) or inception_equity
     month_base = equity_at(now - timedelta(days=30)) or inception_equity
-    day_base = equity_at(now.replace(hour=0, minute=0, second=0, microsecond=0)) or inception_equity
+    # "Today" is measured from the broker's previous-close equity when we have it (Alpaca's
+    # last_equity); the midnight lookup is only a fallback.
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_base = prev_close_equity or equity_at(midnight) or inception_equity
     # A brand-new book: week/month bases can't be earlier than inception.
     if now - inception < timedelta(days=7):
         week_base = inception_equity
@@ -111,9 +115,13 @@ def build_performance(
         before = [b for b in spy_bars if datetime.fromisoformat(b.date).date() <= inception.date()]
         base_close = (before[-1] if before else spy_bars[0]).close
         spy_series.append((inception, Decimal("0")))
+        first_after = True
         for b in spy_bars:
-            ts = datetime.fromisoformat(b.date).replace(tzinfo=inception.tzinfo)
+            ts = _close_ts(b.date)
             if ts > inception and ts >= window_start - timedelta(days=1):
+                if first_after:  # flat until the first session after inception opens, then the open print
+                    spy_series.append((ts - timedelta(hours=6, minutes=30), capital_cap * (b.open / base_close - 1)))
+                    first_after = False
                 spy_series.append((ts, capital_cap * (b.close / base_close - 1)))
         last_spy = spy_now if spy_now is not None else spy_bars[-1].close
         if spy_now is not None:
@@ -121,6 +129,14 @@ def build_performance(
         spy_since = capital_cap * (last_spy / base_close - 1)
     else:
         warnings.append("no SPY bars for benchmark")
+
+    # Until the first fill the book is flat at zero by definition — draw it that way instead of
+    # interpolating a slope through the weekend.
+    first_fill = min((o.filled_at for o in fills if o.filled_at and o.filled_qty > 0), default=None)
+    if first_fill and inception < first_fill and not any(ts >= first_fill for ts, _ in in_window[:1]):
+        in_window = [(ts, v) for ts, v in in_window if ts <= inception or ts >= first_fill]
+        in_window.insert(1 if in_window and in_window[0][0] <= inception else 0, (first_fill, Decimal("0")))
+        in_window.sort()
 
     fill_marks: list[tuple[datetime, str, Side, Decimal]] = []
     for o in fills:
@@ -145,6 +161,15 @@ def build_performance(
     )
 
 
+def _close_ts(date_str: str) -> datetime:
+    """A daily bar's date, stamped at the 16:00 New York close (as an aware UTC datetime)."""
+    from zoneinfo import ZoneInfo
+
+    ny = ZoneInfo("America/New_York")
+    d = datetime.fromisoformat(date_str)
+    return d.replace(hour=16, minute=0, tzinfo=ny).astimezone(ZoneInfo("UTC"))
+
+
 def caption(p: Performance, mode: str) -> str:
     """The numbers, for the Telegram caption. Plain text, no spin."""
     days = max((utcnow() - p.inception).days, 0)
@@ -166,32 +191,37 @@ def render_chart(p: Performance, out_path: Path, *, title: str = "Book P&L — l
     import matplotlib
 
     matplotlib.use("Agg")
+    from zoneinfo import ZoneInfo
+
     import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
 
+    ny = ZoneInfo("America/New_York")
     esc = lambda s: s.replace("$", r"\$")  # noqa: E731 — matplotlib treats $...$ as math mode
     fig, ax = plt.subplots(figsize=(9, 4.8), dpi=150)
     if p.pnl_series:
-        xs = [ts for ts, _ in p.pnl_series]
+        xs = [ts.astimezone(ny) for ts, _ in p.pnl_series]
         ys = [float(v) for _, v in p.pnl_series]
         ax.plot(xs, ys, color="#1f77b4", linewidth=2, label=esc("Book P&L ($)"))
         ax.fill_between(xs, ys, 0, where=[y >= 0 for y in ys], color="#1f77b4", alpha=0.10)
         ax.fill_between(xs, ys, 0, where=[y < 0 for y in ys], color="#d62728", alpha=0.10)
     if p.spy_series:
-        ax.plot([ts for ts, _ in p.spy_series], [float(v) for _, v in p.spy_series],
+        ax.plot([ts.astimezone(ny) for ts, _ in p.spy_series], [float(v) for _, v in p.spy_series],
                 color="#7f7f7f", linewidth=1.5, linestyle="--", label=esc(f"SPY, same ${p.capital_cap:,.0f} held"))
     for i, (ts, sym, side, y) in enumerate(sorted(p.fills)):
         buy = side is Side.BUY
-        ax.scatter([ts], [float(y)], marker="^" if buy else "v", color="#2ca02c" if buy else "#d62728", s=60, zorder=5)
-        ax.annotate(f"{'▲' if buy else '▼'} {sym}", (ts, float(y)), textcoords="offset points",
+        tsl = ts.astimezone(ny)
+        ax.scatter([tsl], [float(y)], marker="^" if buy else "v", color="#2ca02c" if buy else "#d62728", s=60, zorder=5)
+        ax.annotate(f"{'▲' if buy else '▼'} {sym}", (tsl, float(y)), textcoords="offset points",
                     xytext=(6, 10 + 9 * (i % 6)), fontsize=7, color="#2ca02c" if buy else "#d62728")
     ax.axhline(0, color="black", linewidth=0.8)
     ax.set_title(esc(title), fontsize=12, loc="left")
     ax.set_ylabel(esc(f"P&L in $ (right axis: % of ${p.capital_cap:,.0f})"))
     ax.grid(True, alpha=0.25)
-    locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
+    locator = mdates.AutoDateLocator(minticks=4, maxticks=8, tz=ny)
     ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator, tz=ny))
+    ax.set_xlabel("New York time")
     ax2 = ax.twinx()
     y0, y1 = ax.get_ylim()
     cap = float(p.capital_cap) or 1.0
