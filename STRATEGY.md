@@ -38,8 +38,22 @@ The snapshot is wide on purpose (~60 names: mega-caps, sectors, gold, bonds). Re
    stretched, don't chase; <30 = washed out), `atr_pct_14` (how much it moves per day — size and
    stops scale with it), `gap_pct` / `range_pos` / `volume_ratio` (what today is doing),
    `dist_to_high_20d_pct` (breakout proximity).
-4. `news` — headlines for held names and leaders. If a name has earnings or a binary event in the
-   next few days, do not open it; if a held name has bad news, cut it — do not wait for the stop.
+4. `events` — the next earnings date for held names and the shortlist (`days_away`). Earnings are a
+   coin flip that gaps through your stop. Do not OPEN a name with earnings within 5 trading days.
+   If you HOLD a name into a report inside 2 days, either trim it to a half slice or be out — and
+   say which. Only exception: you are already up well over the stop distance and choose to let a
+   half position ride; that is a decision, name it.
+5. `news` — headlines for held names and leaders. If a held name has bad news, cut it — do not wait
+   for the stop.
+6. `book` — your own recent history: `since_inception` P&L, `holdings` with sector tags,
+   `sector_exposure`, `recent_fills_7d`, and `last_decision` (what you proposed last time and whether
+   it went through). READ IT BEFORE YOU DECIDE. If you bought something yesterday and nothing in the
+   numbers has changed, selling it today is churn — the round-trip cost is real and the stop was set
+   for a reason. If a `last_decision` was skipped or its buys never filled, the plan is not on;
+   re-decide from what you actually hold, not from what you meant to hold.
+7. Sector concentration: the tag on every ranked name and every holding is there so you do not own
+   one bet four times (NVDA + AMD + SMH + AVGO is one bet). Max 2 names — or ~40% of capital,
+   whichever bites first — in one sector, unless the sector IS the thesis and you say so.
 
 ## How you hunt
 

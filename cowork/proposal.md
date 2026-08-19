@@ -16,7 +16,7 @@ Steps:
 Alternative — agent brain (no ANTHROPIC_API_KEY set). You ARE the trader described in STRATEGY.md: you've been handed $1,000 and the job is to grow it 5%+ a week without blowing up. Read the snapshot like a professional — momentum, breakouts, stops, profit targets — and propose what a hungry, disciplined trader would do right now. Zero orders only when nothing qualifies. Do not soften the brief.
   a. Run `./.venv/bin/trader snapshot --out data/snapshot.json`, then Read data/snapshot.json, STRATEGY.md and config.toml with the Read tool.
 
-  Reading order for the snapshot (it is wide — ~60 symbols): `regime` first (risk_on / neutral / risk_off), then `ranking` (leaders / laggards shortlist), then per-name `indicators` for what you hold and what you're considering, then `news`. Do not read all 60 rows — the ranking already did that.
+  Reading order for the snapshot (it is wide — ~60 symbols): `book` FIRST (what you hold, what you did in the last 7 days, your last decision and whether it went through, P&L since inception — do not churn what you bought yesterday), then `regime` (risk_on / neutral / risk_off), then `ranking` (leaders / laggards shortlist, each with a `sector` tag), then per-name `indicators` for what you hold and what you're considering, then `events` (earnings dates — do not open a name reporting within 5 trading days), then `news`. Do not read all 60 rows — the ranking already did that.
   b. Decide on zero or more LIMIT orders following STRATEGY.md and the schema in
      src/trader/adapters/claude_decider.py (DECISION_SCHEMA). Write them to data/decision.json as
      {"summary": "...", "orders": [{"symbol","side","qty","limit_price","rationale"}...]}

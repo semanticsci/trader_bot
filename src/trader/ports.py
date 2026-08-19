@@ -69,6 +69,14 @@ class MarketDataPort(Protocol):
         ...
 
 
+class EventsPort(Protocol):
+    """Corporate events that move prices on a schedule (earnings, for now)."""
+
+    def next_earnings(self, symbols: list[str]) -> dict[str, str]:
+        """{symbol: ISO date of the next earnings report} for the names that have one. Never raises."""
+        ...
+
+
 class DeciderPort(Protocol):
     """The brain. Given what the market looks like, what should we do?"""
 

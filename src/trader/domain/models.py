@@ -150,6 +150,10 @@ class MarketSnapshot:
     regime: dict[str, Any] = field(default_factory=dict)  # SPY trend, breadth, risk-on/off verdict
     ranking: tuple[dict[str, Any], ...] = ()  # symbols scored by momentum, strongest first (the shortlist)
     news: dict[str, tuple[str, ...]] = field(default_factory=dict)  # symbol -> recent headlines
+    events: dict[str, Any] = field(default_factory=dict)  # symbol -> {"next_earnings": date, "days_away": n}
+    # The book's own recent history: P&L since inception, this week's fills, the last decision.
+    # The brain reads this so it doesn't churn — it knows what it bought, when, and why.
+    book: dict[str, Any] = field(default_factory=dict)
 
     @property
     def pending_buy_notional(self) -> Money:

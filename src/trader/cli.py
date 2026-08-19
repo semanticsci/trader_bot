@@ -15,6 +15,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from trader.adapters.alpaca_broker import AlpacaBroker
@@ -181,10 +183,54 @@ def cmd_approve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _inception(journal: object, broker: object) -> tuple[datetime, Decimal]:
+    """When the book started and the equity then. Recorded once in the journal (from the first
+    proposal ever made); falls back to "now" for a brand-new install."""
+    from trader.domain.models import utcnow
+
+    inception_raw = journal.get_state("inception_at")  # type: ignore[attr-defined]
+    inception_eq_raw = journal.get_state("inception_equity")  # type: ignore[attr-defined]
+    if inception_raw and inception_eq_raw:
+        return datetime.fromisoformat(inception_raw), Decimal(inception_eq_raw)
+    first = journal.list_proposals(datetime(2000, 1, 1, tzinfo=utcnow().tzinfo))  # type: ignore[attr-defined]
+    if first:
+        inception = first[0].created_at
+        inception_eq = Decimal(str(first[0].snapshot.get("account", {}).get("equity", "0")))
+    else:
+        inception = utcnow()
+        inception_eq = broker.get_account().equity  # type: ignore[attr-defined]
+    journal.set_state("inception_at", inception.isoformat())  # type: ignore[attr-defined]
+    journal.set_state("inception_equity", str(inception_eq))  # type: ignore[attr-defined]
+    return inception, inception_eq
+
+
 def cmd_snapshot(args: argparse.Namespace) -> int:
+    from datetime import timedelta
+
+    from trader.adapters.yfinance_events import YFinanceEvents
+    from trader.domain.models import utcnow
+
     s = load_settings()
     broker = _broker(s)
-    snap = take_snapshot(broker, broker, s.universe, s.history_days, s.risk.capital_cap)
+    journal = _journal(s)
+    recent = journal.list_proposals(utcnow() - timedelta(days=7))
+    last: dict[str, object] | None = None
+    if recent:
+        lp = recent[-1]
+        last = {
+            "at": lp.created_at.isoformat(timespec="minutes"),
+            "status": lp.status.value,
+            "summary": lp.summary[:400],
+            "orders": [o.describe() for o in lp.accepted],
+            "cancels": [c.describe() if hasattr(c, "describe") else str(c) for c in lp.cancels],
+            "gate_rejected": [f"{r.order.describe()} — {'; '.join(r.reasons)}" for r in lp.rejected],
+        }
+    snap = take_snapshot(
+        broker, broker, s.universe, s.history_days, s.risk.capital_cap,
+        events=YFinanceEvents(s.db_path.parent / "earnings_cache.json"),
+        inception=_inception(journal, broker),
+        last_decision=last,
+    )
     text = to_json(snap.to_json_dict())
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -231,8 +277,6 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 def cmd_chart(args: argparse.Namespace) -> int:
-    from datetime import datetime
-    from decimal import Decimal
 
     from trader.app.chart import build_performance, caption, render_chart
     from trader.domain.models import utcnow
@@ -240,23 +284,7 @@ def cmd_chart(args: argparse.Namespace) -> int:
     s = load_settings()
     broker = _broker(s)
     journal = _journal(s)
-    # Inception = the moment the book started. Recorded once, in the journal, from the first
-    # proposal we ever made; falls back to "now" for a brand-new install.
-    inception_raw = journal.get_state("inception_at")
-    inception_eq_raw = journal.get_state("inception_equity")
-    if not (inception_raw and inception_eq_raw):
-        first = journal.list_proposals(datetime(2000, 1, 1, tzinfo=utcnow().tzinfo))
-        if first:
-            inception = first[0].created_at
-            inception_eq = Decimal(str(first[0].snapshot.get("account", {}).get("equity", "0")))
-        else:
-            inception = utcnow()
-            inception_eq = broker.get_account().equity
-        journal.set_state("inception_at", inception.isoformat())
-        journal.set_state("inception_equity", str(inception_eq))
-    else:
-        inception = datetime.fromisoformat(inception_raw)
-        inception_eq = Decimal(inception_eq_raw)
+    inception, inception_eq = _inception(journal, broker)
 
     # Intraday points for the chart window + daily points for the month-over-month base.
     seen: dict[datetime, Decimal] = {}

@@ -306,3 +306,60 @@ def test_rank_and_regime():
     assert ranking[-1]["symbol"] == "WEAK" and ranking[-1]["tag"] == "laggard"
     regime = market_regime(inds, "SPY")
     assert regime["verdict"] in {"risk_on", "neutral", "risk_off"} and regime["breadth_above_sma20"] is not None
+
+
+# --------------------------------------------------------------------------- new data sources
+
+
+def test_yfinance_events_uses_cache_and_never_raises(tmp_path, monkeypatch) -> None:
+    """Arrange a warm cache: the adapter must answer from it without touching yfinance."""
+    import json
+    from datetime import UTC, datetime
+
+    from trader.adapters.yfinance_events import YFinanceEvents
+
+    cache = tmp_path / "earnings.json"
+    cache.write_text(json.dumps({
+        "NVDA": {"at": datetime.now(UTC).isoformat(), "date": "2026-08-26"},
+        "SPY": {"at": datetime.now(UTC).isoformat(), "date": None},  # ETF: known to have none
+    }))
+    # Act — if it tried the network we'd know: yfinance is made un-importable.
+    monkeypatch.setitem(__import__("sys").modules, "yfinance", None)
+    out = YFinanceEvents(cache).next_earnings(["NVDA", "SPY"])
+    # Assert
+    assert out == {"NVDA": "2026-08-26"}
+
+
+def test_snapshot_carries_book_events_and_sectors(broker) -> None:
+    """The brain sees its own history, earnings dates and sector tags."""
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from trader.app.snapshot import take_snapshot
+
+    class Events:
+        def next_earnings(self, symbols):  # noqa: ANN001, ANN202
+            return {"AAPL": "2026-08-21"}
+
+    snap = take_snapshot(
+        broker, broker, ("AAPL", "NVDA", "SPY"), 60, Decimal("1000"),
+        with_news=False, events=Events(),
+        inception=(datetime(2026, 8, 15, tzinfo=UTC), Decimal("990")),
+        last_decision={"status": "skipped", "summary": "x"},
+    )
+    assert snap.events["AAPL"]["next_earnings"] == "2026-08-21"
+    assert snap.events["AAPL"]["held"] is True
+    assert snap.book["holdings"][0] == {
+        "symbol": "AAPL", "qty": "2", "market_value": "400", "unrealized_pl_pct": "0.00%", "sector": "tech",
+    }
+    assert snap.book["sector_exposure"] == {"tech": "40.0%"}
+    assert snap.book["since_inception"]["pnl_dollars"] == "10.00"
+    assert snap.book["last_decision"]["status"] == "skipped"
+    assert all("sector" in r for r in snap.ranking)
+
+
+def test_sector_of_unknown_is_other() -> None:
+    from trader.domain.sectors import sector_of
+
+    assert sector_of("nvda") == "semis"
+    assert sector_of("ZZZZ") == "other"

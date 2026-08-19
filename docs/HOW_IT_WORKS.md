@@ -15,8 +15,22 @@ yesterday's closing equity) and *what are prices doing?* for every symbol in the
 universe plus anything you already hold — the current quote and the last ~60 daily bars.
 
 From the bars it computes a few honest indicators (`domain/indicators.py`): 20- and 50-day
-moving averages, 20-day high/low, 5- and 20-day returns, average volume. Nothing exotic;
-enough that neither the model nor you has to squint at 60 numbers per symbol.
+moving averages, 20-day high/low, 5- and 20-day returns, RSI, ATR%, relative strength vs SPY,
+today's gap / range position / volume ratio, distance to the 20-day high. From those it derives a
+**market regime** (SPY trend + breadth → risk_on / neutral / risk_off) and a **momentum ranking**
+(leaders / laggards, each tagged with a sector from `domain/sectors.py`).
+
+Then the context a human trader would also have open in other tabs:
+- **news** — Alpaca's headline feed for held names and leaders (best-effort);
+- **events** — the next earnings date per held/shortlisted name, from Yahoo Finance via
+  `adapters/yfinance_events.py` (cached on disk for a day; ETFs have none);
+- **book** — the account's *own* recent history: holdings with sector tags and sector exposure,
+  every fill in the last 7 days, P&L since inception, and the last decision (what was proposed
+  and whether it went through). This is what stops the brain from re-deciding from scratch and
+  churning yesterday's buys.
+
+Every one of these is optional and best-effort: if Yahoo or the news feed is down the snapshot
+still builds; only prices and the account are hard requirements.
 
 All of that becomes one immutable object, `MarketSnapshot`. It is what the brain sees and
 what the journal keeps, verbatim, forever.
