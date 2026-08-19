@@ -45,6 +45,9 @@ class ApproveDeps:
     history_days: int
     allowed_chat_id: str
     halted_check: object = field(default=lambda: False)  # callable() -> bool; injected for tests
+    # Optional: callable() -> (RiskConfig, universe, history_days). Called before every submit so a
+    # long-running approver picks up config.toml changes (universe, limits) without a restart.
+    reload_config: object = None
 
     def is_halted(self) -> bool:
         fn = self.halted_check
@@ -139,6 +142,11 @@ def handle_tap(tap: Tap, deps: ApproveDeps) -> TapOutcome:
 
 def submit_proposal(proposal: Proposal, deps: ApproveDeps) -> TapOutcome:
     """Gate again on fresh data, submit survivors, journal, report back."""
+    if callable(deps.reload_config):
+        try:
+            deps.risk_config, deps.universe, deps.history_days = deps.reload_config()
+        except Exception:  # noqa: BLE001 — a bad reload must not block; keep the last-known config
+            log.exception("config reload failed; using previous config")
     if deps.is_halted():
         proposal.status = ProposalStatus.SKIPPED
         deps.journal.save_proposal(proposal)

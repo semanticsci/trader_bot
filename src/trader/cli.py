@@ -174,6 +174,7 @@ def cmd_approve(args: argparse.Namespace) -> int:
         history_days=s.history_days,
         allowed_chat_id=s.telegram_chat_id,
         halted_check=s.halt_file.exists,
+        reload_config=lambda: (lambda st: (st.risk, st.universe, st.history_days))(load_settings()),
     )
     run_approver(deps, once=args.once)
     return 0

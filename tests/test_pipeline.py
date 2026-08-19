@@ -316,3 +316,16 @@ def test_stale_cancel_at_tap_time_is_reported_not_fatal(risk_config):
     outcome = handle_tap(Tap(10, CHAT, "approve", proposal.id, "", "cq10"), approve)
     assert outcome.action == "submitted" and b.cancelled == [] and [o.symbol for o in b.submitted] == ["AMD"]
     assert any("Could not cancel" in s for s in notifier.sent)
+
+
+def test_approver_reloads_config_before_submit(broker, risk_config):
+    """A long-running approver must pick up a widened universe without a restart."""
+    journal = SqliteJournal(":memory:")
+    notifier = FakeNotifier()
+    good = ProposedOrder("NVDA", Side.BUY, Decimal("1"), Decimal("180"), "trend up")
+    propose_deps, approve_deps = _deps(broker, journal, notifier, risk_config, [good])
+    proposal = run_propose(propose_deps)
+    approve_deps.universe = ("AAPL",)  # stale: NVDA not in it -> would be rejected at submit
+    approve_deps.reload_config = lambda: (risk_config, ("AAPL", "NVDA", "SPY", "TQQQ"), 30)  # fresh config
+    outcome = handle_tap(Tap(11, CHAT, "approve", proposal.id, "", "cq11"), approve_deps)
+    assert outcome.action == "submitted" and [o.symbol for o in broker.submitted] == ["NVDA"]
