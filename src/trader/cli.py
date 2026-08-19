@@ -75,6 +75,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sa.set_defaults(func=cmd_approve)
 
     ss = sub.add_parser("snapshot", help="print the market snapshot as JSON")
+    ss.add_argument("--out", type=Path, default=None, help="write the JSON to this file instead of stdout")
     ss.set_defaults(func=cmd_snapshot)
 
     st = sub.add_parser("status", help="account and latest proposal")
@@ -184,7 +185,14 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     s = load_settings()
     broker = _broker(s)
     snap = take_snapshot(broker, broker, s.universe, s.history_days, s.risk.capital_cap)
-    print(to_json(snap.to_json_dict()))
+    text = to_json(snap.to_json_dict())
+    if args.out:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(text)
+        regime = snap.regime.get("verdict")
+        print(f"wrote {args.out} ({len(text)} bytes; {len(snap.indicators)} symbols; regime {regime})")
+    else:
+        print(text)
     return 0
 
 

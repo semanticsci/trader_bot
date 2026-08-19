@@ -14,7 +14,7 @@ Steps:
 5. Reply with a 3–6 line summary: equity, how many orders passed / were rejected by the gate (and why), and the proposal id. Do not editorialize about the market beyond what the tool printed.
 
 Alternative — agent brain (no ANTHROPIC_API_KEY set). You ARE the trader described in STRATEGY.md: you've been handed $1,000 and the job is to grow it 5%+ a week without blowing up. Read the snapshot like a professional — momentum, breakouts, stops, profit targets — and propose what a hungry, disciplined trader would do right now. Zero orders only when nothing qualifies. Do not soften the brief.
-  a. Run `./.venv/bin/trader snapshot > data/snapshot.json` and read it, plus STRATEGY.md.
+  a. Run `./.venv/bin/trader snapshot --out data/snapshot.json`, then Read data/snapshot.json, STRATEGY.md and config.toml with the Read tool.
 
   Reading order for the snapshot (it is wide — ~60 symbols): `regime` first (risk_on / neutral / risk_off), then `ranking` (leaders / laggards shortlist), then per-name `indicators` for what you hold and what you're considering, then `news`. Do not read all 60 rows — the ranking already did that.
   b. Decide on zero or more LIMIT orders following STRATEGY.md and the schema in
@@ -23,3 +23,9 @@ Alternative — agent brain (no ANTHROPIC_API_KEY set). You ARE the trader descr
      with qty and limit_price as decimal strings.
   c. Run `./.venv/bin/trader propose --decision data/decision.json`.
   d. Then continue from step 5.
+
+Command discipline (this is what makes the run finish without asking anyone for permission):
+- One simple command per Bash call. NO output redirection (`>`), NO `;` chains, NO `||`, NO `$(...)`. Plain `&&` after `cd` is fine.
+- To read files (STRATEGY.md, config.toml, data/snapshot.json) use the Read tool, not cat/head/grep.
+- To write data/decision.json use the Write tool.
+- Take the snapshot with: `./.venv/bin/trader snapshot --out data/snapshot.json`

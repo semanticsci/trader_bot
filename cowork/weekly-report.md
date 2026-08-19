@@ -14,3 +14,6 @@ Steps:
    - One concrete suggested edit to STRATEGY.md (quote the sentence to change and the replacement). Do NOT edit the file yourself.
    - One thing worth teaching from this week (a concept, a mistake, a pattern).
 5. Reply with the report text followed by the critique. Do not sugar-coat a losing week; do not celebrate a winning one as skill.
+
+
+Command discipline: one simple command per Bash call — no `>` redirects, no `;` chains, no `||`, no `$(...)`. Use the Read tool for files.
