@@ -246,6 +246,35 @@ def test_build_performance_numbers_and_series():
     assert "+$25.00" in text and "+2.50%" in text and "SPY" in text
 
 
+def test_strip_base_value_offset_fixes_alpaca_intraday_equity():
+    """Alpaca's 15Min portfolio history reports equity one whole base_value too high once the
+    account has traded; the flat pre-trade points are already correct. Fix only the wrong ones."""
+    from datetime import UTC, datetime
+
+    from trader.adapters.alpaca_broker import strip_base_value_offset
+
+    t = datetime(2026, 8, 17, 13, 30, tzinfo=UTC)
+    points = [
+        (t, Decimal("100000.00")),     # before the first trade: correct as-is
+        (t, Decimal("199999.88")),     # base_value double-counted
+        (t, Decimal("199965.59")),     # base_value double-counted
+    ]
+    fixed = strip_base_value_offset(points, base_value=Decimal("100000"), anchor=Decimal("99965.28"))
+    assert [eq for _, eq in fixed] == [Decimal("100000.00"), Decimal("99999.88"), Decimal("99965.59")]
+
+
+def test_strip_base_value_offset_leaves_a_healthy_series_alone():
+    from datetime import UTC, datetime
+
+    from trader.adapters.alpaca_broker import strip_base_value_offset
+
+    t = datetime(2026, 8, 17, 13, 30, tzinfo=UTC)
+    points = [(t, Decimal("100000")), (t, Decimal("99971.11")), (t, Decimal("99965.28"))]
+    assert strip_base_value_offset(points, base_value=Decimal("100000"), anchor=Decimal("99965.28")) == points
+    # no base_value reported → nothing to undo
+    assert strip_base_value_offset(points, base_value=Decimal("0"), anchor=Decimal("99965.28")) == points
+
+
 def test_build_performance_handles_no_history():
     from datetime import UTC, datetime
 

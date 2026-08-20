@@ -35,6 +35,36 @@ def _dec(value: object, default: str = "0") -> Decimal:
     return Decimal(str(value))
 
 
+def strip_base_value_offset(
+    points: list[tuple[datetime, Decimal]], *, base_value: Decimal, anchor: Decimal
+) -> list[tuple[datetime, Decimal]]:
+    """Undo Alpaca's double-counted `base_value` in the intraday portfolio history.
+
+    Alpaca documents ``equity = base_value + profit_loss``. On the intraday (15Min) series the
+    ``profit_loss`` field comes back holding the *absolute equity* instead of the P&L, so every
+    point after the first trade is reported one whole ``base_value`` too high — a $100k paper
+    account charts at ~$200k and the book's real ±$30 swing is invisible. The daily (1D) series
+    is fine, which is why only some points are wrong.
+
+    We can't just subtract ``base_value`` everywhere: the flat points before the first trade are
+    already correct (there ``profit_loss`` is a genuine 0). So for each point keep whichever of
+    ``eq`` and ``eq - base_value`` sits closer to ``anchor`` — the account's real current equity.
+    A healthy series is always closer as-is, so this is a no-op once Alpaca fixes the feed.
+
+    (The rule assumes equity has not moved by more than about half of ``base_value`` across the
+    window. That holds by construction here: the book is capped at a fraction of the account.)
+    """
+    if base_value <= 0:
+        return points
+    fixed: list[tuple[datetime, Decimal]] = []
+    for ts, eq in points:
+        corrected = eq - base_value
+        if corrected > 0 and abs(corrected - anchor) < abs(eq - anchor):
+            eq = corrected
+        fixed.append((ts, eq))
+    return fixed
+
+
 class AlpacaBroker:
     """Trading + market data through Alpaca."""
 
@@ -112,7 +142,8 @@ class AlpacaBroker:
             if eq is None or float(eq) <= 0:
                 continue  # points before the account existed come back as 0
             out.append((datetime.fromtimestamp(int(ts), tz=UTC), _dec(eq)))
-        return out
+        base = _dec(h.base_value, default="0") if getattr(h, "base_value", None) else Decimal("0")
+        return strip_base_value_offset(out, base_value=base, anchor=_dec(self._trading.get_account().equity))
 
     # ------------------------------------------------------------------ MarketDataPort
 
