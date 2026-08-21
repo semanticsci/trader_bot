@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Keep the Mac awake through the trading day.
+
+         Why this exists: this Mac is set to idle-sleep after 1 minute. The scheduled
+         check-ins (09:48 / 12:38 / 15:04 New York) are Claude Desktop tasks, and a
+         sleeping Mac does not run them — it runs them whenever you next touch the
+         laptop. On Aug 19-20 that meant the midday check-in landed at 14:24 and the
+         pre-close one at 19:44, almost four hours after the closing bell.
+
+         `caffeinate -i` blocks *idle system* sleep only; the display still sleeps on
+         its own schedule, so the battery cost is modest. It does NOT beat closing the
+         lid (clamshell sleep) — keep the lid open, or docked to power/display.
+
+         Times are New York local (launchd reads StartCalendarInterval in local time).
+         09:25 -> +26400s = 16:45, covering the open, midday, close and EOD summary. -->
+    <key>Label</key>
+    <string>com.trading-agent.markethours-awake</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-i</string>
+        <string>-t</string>
+        <string>26400</string>
+    </array>
+
+    <!-- Weekdays only: launchd Weekday 1=Monday ... 5=Friday. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>25</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>25</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>25</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>25</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>25</integer></dict>
+    </array>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/sergey/Development/trading-agent/data/awake.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sergey/Development/trading-agent/data/awake.log</string>
+</dict>
+</plist>

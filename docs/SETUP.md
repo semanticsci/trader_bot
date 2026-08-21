@@ -107,8 +107,32 @@ then the EOD summary and the Sunday review. Or use plain cron:
 ```
 (cron needs `ANTHROPIC_API_KEY` in `.env`, since there is no Cowork agent to be the brain.)
 
-Remember: scheduled tasks only fire when the machine is awake (and, for Cowork, when the app
-is open). Keep the Mac awake 09:30–16:30 ET on weekdays.
+### Keep the Mac awake, or none of this runs on time
+
+Scheduled tasks only fire when the machine is awake (and, for Cowork, when the app is open).
+This is not a footnote — it is the single most common reason the pipeline "does nothing". A Mac
+set to idle-sleep after a minute will run the 12:38 check-in whenever you next open the lid.
+We measured exactly that: on Aug 19–20 the midday run landed at 14:24 and the pre-close run at
+19:44, almost four hours after the closing bell, proposing into a market that had shut.
+
+Install the wake agent (weekdays, 09:25 → 16:45 New York, no password needed):
+
+```
+cp launchd/com.trading-agent.markethours-awake.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.trading-agent.markethours-awake.plist
+```
+
+It runs `caffeinate -i`, which blocks *idle* sleep while letting the display sleep normally, so
+the battery cost is modest. Two things it cannot do: it will not beat **closing the lid**
+(clamshell sleep), and it cannot wake a Mac that is already fully asleep at 09:25. Leave the lid
+open. If you want the Mac to wake itself before the open, that needs one `sudo` command:
+
+```
+sudo pmset repeat wakeorpoweron MTWRF 09:20:00
+```
+
+To remove the agent: `launchctl bootout gui/$(id -u)/com.trading-agent.markethours-awake` and
+delete the plist.
 
 ## 10. Live money (read twice, do once, or never)
 
