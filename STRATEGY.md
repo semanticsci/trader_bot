@@ -75,9 +75,20 @@ Think broad, deep and creative about the data in front of you, then act decisive
 
 ## Sizing
 
-- 3–5 positions in risk_on, 2–3 in neutral, 0–2 (or defensives) in risk_off. Standard slice 20–25%
-  of capital; a weaker or higher-ATR setup gets 10–15% (a 7%-ATR name at 25% is a coin flip, not a
-  position).
+Five positions at 20% each is an index fund with extra steps. It cannot produce a 5% week: your
+average holding would have to gain 5%, and mega-caps move 2–3%. So the book is concentrated.
+
+- **Three names, maximum. Two is fine.** The gate enforces it — a buy that would open a fourth
+  name is rejected outright. If you want something new, put the sell that makes room in the *same*
+  proposal; a rotation is one tap, and the gate counts the freed capital.
+- **35–40% of capital per name.** The gate caps a position at 40% and a single order at $400. A
+  high-ATR name (>5% a day) gets the low end of that range; your highest-conviction leader gets
+  the high end. Do not spread a slice thin out of nervousness — that is the failure we are fixing.
+- **Only names in the top 5 of `ranking`.** If it is not a ranked leader, you do not own it. No
+  unranked defensives in a risk_on tape: that is how LLY (relative strength +2.3% vs SPY) became
+  the worst position in the book while four ranked leaders sat around it.
+- **In `risk_off`: 0–2 names, or step aside into GLD / TLT / cash.** Concentration cuts both ways.
+  A 40% position in a falling tape is exactly how the $1,000 dies, and surviving outranks winning.
 - Limit orders only, priced within ~0.5% of the current quote (below for buys, above for sells).
 - Respect the gate: it enforces max position size, total deployed capital, blocked symbols, no
   shorting, and a daily-loss breaker. Those are the walls of the arena; play hard inside them.

@@ -31,11 +31,17 @@ history_days = 60
 capital_cap = 1000
 
 # Largest a single position may be, as a fraction of total equity, AFTER the order fills.
-max_position_pct = 0.25
+# 0.40 = concentrated on purpose. Five names at 20% is an index fund with extra steps: it cannot
+# produce a 5% week, because the average holding would have to move 5% and mega-caps move 2-3%.
+max_position_pct = 0.40
 # Largest single order, in dollars.
 max_order_notional = 400
-# Most orders the gate will pass in one proposal.
+# Most orders the gate will pass in one proposal. Kept at 5 so a rotation (sell two, buy two)
+# fits in a single tap.
 max_orders_per_proposal = 5
+# Most distinct names held at once. THIS is the concentration rule: a buy that would open a
+# fourth name is rejected, so the brain must sell in the same proposal to make room.
+max_open_positions = 3
 # Keep at least this fraction of the budget in cash (buys that would breach it are rejected).
 # 0 = the owner wants the whole budget deployable; the capital_cap is the real ceiling.
 min_cash_buffer_pct = 0.0

@@ -87,6 +87,9 @@ def load_settings(root: Path | None = None, *, require_broker: bool = True) -> S
         capital_cap=capital_cap,
         max_position_pct=Decimal(str(risk_cfg.get("max_position_pct", "0.25"))),
         max_order_notional=Decimal(str(risk_cfg.get("max_order_notional", "400"))),
+        max_open_positions=(
+            int(risk_cfg["max_open_positions"]) if risk_cfg.get("max_open_positions") else None
+        ),
         max_orders_per_proposal=int(risk_cfg.get("max_orders_per_proposal", 3)),
         min_cash_buffer_pct=Decimal(str(risk_cfg.get("min_cash_buffer_pct", "0.10"))),
         max_daily_loss_pct=Decimal(str(risk_cfg.get("max_daily_loss_pct", "0.03"))),

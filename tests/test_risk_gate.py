@@ -246,3 +246,49 @@ def test_sell_then_buy_rotation_passes_when_book_is_full(risk_config):
     assert [r.accepted for r in good] == [True, True], [r.reasons for r in good]
     bad = risk.evaluate([order("CCC", Side.BUY, "2", "100"), order("AAA", Side.SELL, "1", "200")], snap, cfg)
     assert not bad[0].accepted and "capital cap" in _reasons(bad, 0)
+
+
+# --------------------------------------------------------------------------- concentration
+
+
+def test_gate_rejects_a_buy_that_would_open_one_name_too_many(snapshot, risk_config):
+    """The book already holds AAPL; with max_open_positions=1 a second name must be refused."""
+    # Arrange
+    config = replace(risk_config, max_open_positions=1)
+    # Act
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "180")], snapshot, config)
+    # Assert
+    assert not res[0].accepted
+    assert "at most 1 names" in _reasons(res)
+
+
+def test_gate_allows_adding_to_a_name_already_held(snapshot, risk_config):
+    """Concentration limits how many names you hold, not how much of one you own.
+
+    max_position_pct is raised here so the *size* rule cannot mask what we are testing: AAPL is
+    already 40% of this fixture's book, so the 25% default would reject the add for its own reasons.
+    """
+    config = replace(risk_config, max_open_positions=1, max_position_pct=Decimal("0.50"))
+    res = risk.evaluate([order("AAPL", Side.BUY, "0.1", "200")], snapshot, config)
+    assert res[0].accepted, res[0].reasons
+
+
+def test_gate_lets_a_sell_make_room_for_a_buy_in_the_same_proposal(snapshot, risk_config):
+    """Rotation must survive the position cap: sell what you hold, buy what you want, one tap."""
+    # Arrange — one slot, currently filled by AAPL
+    config = replace(risk_config, max_open_positions=1)
+    orders = [
+        order("AAPL", Side.SELL, "2", "200"),
+        order("NVDA", Side.BUY, "1", "180"),
+    ]
+    # Act
+    res = risk.evaluate(orders, snapshot, config)
+    # Assert — the sell empties the slot before the buy is judged
+    assert res[0].accepted, res[0].reasons
+    assert res[1].accepted, res[1].reasons
+
+
+def test_no_position_cap_configured_means_no_limit(snapshot, risk_config):
+    config = replace(risk_config, max_open_positions=None)
+    res = risk.evaluate([order("NVDA", Side.BUY, "1", "180")], snapshot, config)
+    assert res[0].accepted, res[0].reasons

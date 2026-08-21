@@ -135,6 +135,7 @@ def evaluate(
                 projected_value.get(order.symbol, Decimal("0")),
             )
             reasons += _check_capital_cap(order, invested, cash_committed, capital_cap)
+            reasons += _check_position_count(order, projected_qty, config)
         else:
             reasons += _check_sell(order, projected_qty.get(order.symbol, Decimal("0")), config)
 
@@ -247,6 +248,34 @@ def _check_capital_cap(
     after = invested_now + buys_committed + order.notional
     if after > cap:
         return [f"would put ${after:.2f} to work, capital cap is ${cap:.2f}"]
+    return []
+
+
+# Fractional fills leave dust behind; a hundredth of a share is not a "position".
+_DUST = Decimal("0.0001")
+
+
+def _check_position_count(
+    order: ProposedOrder, projected_qty: dict[str, Decimal], config: RiskConfig
+) -> list[str]:
+    """Concentration rule: cap how many distinct names the book holds at once.
+
+    Only a buy that would open a *new* name is rejected. Adding to something already held is
+    always fine, and sells are never checked — otherwise a full book could never trim itself
+    back down to the limit.
+    """
+    limit = config.max_open_positions
+    if limit is None:
+        return []
+    already_held = projected_qty.get(order.symbol, Decimal("0")) > _DUST
+    if already_held:
+        return []
+    open_names = sum(1 for qty in projected_qty.values() if qty > _DUST)
+    if open_names >= limit:
+        return [
+            f"would open a {open_names + 1}th position ({order.symbol}); the book holds at most "
+            f"{limit} names at once — sell something in this same proposal to make room"
+        ]
     return []
 
 

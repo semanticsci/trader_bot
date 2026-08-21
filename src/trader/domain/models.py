@@ -319,6 +319,10 @@ class RiskConfig:
     capital_cap: Money | None = None
     max_position_pct: Decimal = Decimal("0.25")
     max_order_notional: Money = Decimal("400")
+    # Most distinct names the book may hold at once. A buy that would open one more than this is
+    # rejected; adding to a name you already hold is always allowed, and sells are never blocked
+    # (that is how you trim from four names down to three). None = no limit.
+    max_open_positions: int | None = None
     max_orders_per_proposal: int = 3
     min_cash_buffer_pct: Decimal = Decimal("0.10")
     max_daily_loss_pct: Decimal = Decimal("0.03")
